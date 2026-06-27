@@ -37,10 +37,14 @@ def crop_to_map(image, saver):
     return cropped, (x, y), True
 
 
-def _find_map_rectangle(image):
+def find_map_corners(image):
     """
-    Найти крупный ~прямоугольный контур (рамку карты).
-    Возвращает (x, y, w, h) bounding box или None, если уверенной рамки нет.
+    Найти 4 угла прямоугольной рамки карты (как массив точек Nx2 в пикселях),
+    или None, если уверенного четырёхугольника нет.
+
+    Это публичная функция: её использует georef.py для построения GCP, независимо
+    от того, включена ли обрезка (CROP_TO_MAP_BORDER). Сама обрезка — отдельное
+    решение, а углы рамки полезны для геопривязки в любом случае.
     """
     h_img, w_img = image.shape[:2]
     img_area = h_img * w_img
@@ -54,8 +58,8 @@ def _find_map_rectangle(image):
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    best_box = None
-    best_area = 0
+    best_quad = None
+    best_score = 0.0
     for c in contours:
         area = cv2.contourArea(c)
         # Рамка должна занимать заметную, но не всю площадь кадра.
@@ -64,10 +68,34 @@ def _find_map_rectangle(image):
         if area > config.CROP_MAX_AREA_FRAC * img_area:
             continue
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        # Ищем именно четырёхугольник (прямоугольную рамку).
-        if len(approx) == 4 and cv2.isContourConvex(approx) and area > best_area:
-            best_area = area
-            best_box = cv2.boundingRect(approx)
+        # Мятые исторические карты редко дают чистый 4-угольник с одним epsilon —
+        # пробуем несколько уровней упрощения и берём первый сходящийся в выпуклый квад.
+        approx = None
+        for eps in (0.02, 0.03, 0.05, 0.08):
+            cand = cv2.approxPolyDP(c, eps * peri, True)
+            if len(cand) == 4 and cv2.isContourConvex(cand):
+                approx = cand
+                break
+        if approx is None:
+            continue
+        # Среди кандидатов предпочитаем самый «прямоугольный»: площадь контура,
+        # делённая на площадь его bounding box, у настоящей рамки близка к 1.
+        x, y, w, h = cv2.boundingRect(approx)
+        rectangularity = area / float(w * h) if w * h else 0.0
+        score = rectangularity * area  # прямоугольный И крупный
+        if score > best_score:
+            best_score = score
+            best_quad = approx.reshape(4, 2)
 
-    return best_box
+    return best_quad
+
+
+def _find_map_rectangle(image):
+    """
+    Найти крупный ~прямоугольный контур (рамку карты).
+    Возвращает (x, y, w, h) bounding box или None, если уверенной рамки нет.
+    """
+    quad = find_map_corners(image)
+    if quad is None:
+        return None
+    return cv2.boundingRect(quad.astype("int32"))

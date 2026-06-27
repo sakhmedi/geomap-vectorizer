@@ -1,0 +1,323 @@
+{
+  "type": "FeatureCollection",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "EPSG:4326"
+    }
+  },
+  "metadata": {
+    "source_map": "example_original",
+    "image_width_px": 1100,
+    "image_height_px": 946,
+    "cropped_to_map_border": false,
+    "crop_offset_xy": [
+      0,
+      0
+    ],
+    "georeferenced": true,
+    "note": "WGS84 lon/lat. Georeferenced via map-frame corners -> AOI, datum EPSG:4284 -> EPSG:4326 (pyproj).",
+    "source_crs": "EPSG:4284",
+    "target_crs": "EPSG:4326",
+    "gcp_count": 4,
+    "georef_rms_px": 0.0
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.10551801999306,
+            49.19677237534316
+          ],
+          [
+            63.116346861248935,
+            49.19979587196999
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 22.3
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.083302798492944,
+            49.14724549271057
+          ],
+          [
+            63.07699316205261,
+            49.14345541440333
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 15.1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.10397367140428,
+            49.16239405945094
+          ],
+          [
+            63.09827571243201,
+            49.16163512880523
+          ],
+          [
+            63.095408200308555,
+            49.15974226536484
+          ],
+          [
+            63.095958663862056,
+            49.158228912002805
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 22.3
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.15660645520901,
+            49.13324670394773
+          ],
+          [
+            63.14521917778921,
+            49.13400170494171
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 20.8
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            62.81520287835928,
+            49.39846337933138
+          ],
+          [
+            62.8033948333619,
+            49.39844869899621
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 21.8
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.2912465712858,
+            49.15868432726606
+          ],
+          [
+            63.282095660745725,
+            49.15110533187445
+          ],
+          [
+            63.27922451487466,
+            49.14655686717796
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 40.7
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            62.97214332043131,
+            49.16763290831867
+          ],
+          [
+            62.987505433556365,
+            49.168773354819955
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 28.2
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.26890230269046,
+            49.13441909669998
+          ],
+          [
+            63.264902805726514,
+            49.132900280881834
+          ],
+          [
+            63.26375003278006,
+            49.13062322020432
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 15.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.177625662901384,
+            49.25365921204902
+          ],
+          [
+            63.18047439926124,
+            49.25516367983002
+          ],
+          [
+            63.18613551873246,
+            49.254041045992196
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault",
+        "color": "red",
+        "length_px": 17.9
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            62.80226131048908,
+            49.398076568544184
+          ],
+          [
+            62.81294481323106,
+            49.39808983678718
+          ],
+          [
+            62.82704641054777,
+            49.39996100638936
+          ],
+          [
+            62.835975967007144,
+            49.397006076393275
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault_uncertain",
+        "color": "dark",
+        "length_px": 66.2
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.200112213707015,
+            49.22885806493987
+          ],
+          [
+            63.20863163687353,
+            49.229239944572114
+          ],
+          [
+            63.24274975325098,
+            49.236788551162064
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault_uncertain",
+        "color": "dark",
+        "length_px": 83.7
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            63.39498741699282,
+            49.245545211692935
+          ],
+          [
+            63.3955533125869,
+            49.22521640846553
+          ]
+        ]
+      },
+      "properties": {
+        "source_map": "example_original",
+        "type": "fault_uncertain",
+        "color": "dark",
+        "length_px": 56.1
+      }
+    }
+  ]
+}

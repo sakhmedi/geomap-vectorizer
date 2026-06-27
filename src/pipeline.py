@@ -1,19 +1,21 @@
 """
 pipeline.py — обработка ОДНОЙ карты от начала до конца.
 
-Сейчас это «скелет»: только загрузка скана и сохранение исходника в debug.
-По мере роста проекта сюда добавятся этапы: предобработка -> выделение ->
-очистка -> векторизация -> экспорт. Каждый этап будет сохранять свой debug-кадр.
+Этапы: загрузка -> предобработка -> выделение объектов (HSV/тёмные линии/Canny) ->
+очистка масок -> векторизация (осевые линии) -> геопривязка (пиксели -> WGS84) ->
+экспорт (GeoJSON + Shapefile). Каждый этап сохраняет свой debug-кадр.
 
 Функция возвращает небольшой словарь-отчёт по карте (для сводки _summary.csv).
+Принцип: одна плохая карта не роняет весь прогон — помечаем status/confidence/georeferenced.
 """
 
 import cv2
 
-from src import cleanup, config, export, extract, io_utils, preprocess, vectorize
+from src import cleanup, config, export, extract, georef, io_utils, preprocess, vectorize
 
 
-def process_map(image_path, input_dir, output_dir, debug_root, profile_name, debug_enabled=True):
+def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
+                debug_enabled=True, aoi_path=None):
     """
     Прогнать одну карту через пайплайн. Возвращает dict с результатом:
       {name, status, ...}
@@ -52,15 +54,27 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name, deb
     # --- Триаж: насколько уверены в результате ---
     confidence, reason = _assess_confidence(cleaned["combined"], len(features))
 
-    # --- Этап 6: экспорт в GeoJSON ---
+    # --- Этап 5b: геопривязка (пиксели -> WGS84), если задан AOI ---
+    # Привязку строим в той же системе пикселей, что и вектора (prepared["color"]).
+    geo_transform, geo_info = georef.georeference(prepared["color"], map_name, aoi_path)
+
+    # --- Этап 6: экспорт в GeoJSON (+ опц. Shapefile) ---
     # prepared["color"] мог быть ужат — берём его размер, чтобы координаты совпадали с векторами.
     out_h, out_w = prepared["color"].shape[:2]
     geojson = export.features_to_geojson(
         features, map_name, out_w, out_h,
         crop_offset=prepared["crop_offset"],
         cropped=prepared["cropped"],
+        geo_transform=geo_transform,
+        geo_info=geo_info,
     )
     export.write_geojson(geojson, output_dir, map_name)
+    export.write_shapefile(geojson, output_dir, map_name)
+
+    # Причина в сводке: сначала про привязку (если её нет), иначе — про уверенность.
+    summary_reason = reason
+    if not geo_info.get("georeferenced") and geo_info.get("reason"):
+        summary_reason = reason or f"без привязки: {geo_info['reason']}"
 
     return {
         "name": map_name,
@@ -69,7 +83,10 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name, deb
         "height": height,
         "num_features": len(features),
         "confidence": confidence,
-        "reason": reason,
+        "reason": summary_reason,
+        "georeferenced": geo_info.get("georeferenced", False),
+        "crs": f"EPSG:{config.TARGET_EPSG}" if geo_info.get("georeferenced") else "pixel",
+        "georef_rms_px": round(geo_info["rms_px"], 3) if geo_info.get("georeferenced") else "",
     }
 
 

@@ -35,8 +35,11 @@ def cleanup(extracted, saver):
     # Чистим каждую цветную маску по отдельности.
     for color_name, spec in extracted["color_masks"].items():
         # Для разломов (линий) включаем «мост», чтобы сшить разорванные штрихи.
-        is_fault = spec["type"] == "fault"
-        clean = _clean_mask(spec["mask"], kernel, bridge=is_fault)
+        is_fault = spec["type"].startswith("fault")
+        # Тёмные линии (fault_uncertain) шумные: дополнительно оставляем только
+        # длинные тонкие компоненты, выкидывая буквы/штриховку/заливки.
+        line_only = spec["type"] == "fault_uncertain"
+        clean = _clean_mask(spec["mask"], kernel, bridge=is_fault, line_only=line_only)
         clean_color_masks[color_name] = {"mask": clean, "type": spec["type"]}
         saver.save(f"clean_{color_name}", clean)
 
@@ -64,10 +67,12 @@ def cleanup(extracted, saver):
     return {"color_masks": clean_color_masks, "combined": combined, "canny": clean_canny}
 
 
-def _clean_mask(mask, kernel, bridge=False):
+def _clean_mask(mask, kernel, bridge=False, line_only=False):
     """
     Применить OPEN -> CLOSE -> (опц. МОСТ) -> фильтр мелких компонентов к одной маске.
     bridge=True добавляет ещё один CLOSE с бОльшим ядром, чтобы сшить разорванные линии.
+    line_only=True дополнительно оставляет только длинные тонкие компоненты (для
+    тёмных линий: отсекает буквы, штриховку рельефа и заливки).
     """
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel,
                               iterations=config.MORPH_OPEN_ITERATIONS)
@@ -82,8 +87,31 @@ def _clean_mask(mask, kernel, bridge=False):
         closed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, bridge_kernel,
                                   iterations=config.BRIDGE_ITERATIONS)
 
-    filtered = _remove_small_components(closed, config.MIN_COMPONENT_AREA)
-    return filtered
+    if line_only:
+        return _keep_line_like(closed)
+    return _remove_small_components(closed, config.MIN_COMPONENT_AREA)
+
+
+def _keep_line_like(mask):
+    """
+    Оставить только ДЛИННЫЕ и ТОНКИЕ связные компоненты (линии), выкинув короткие
+    кляксы и толстые пятна. Критерий: длинная сторона bbox >= DARK_MIN_LENGTH И
+    средняя толщина (площадь / длинная сторона) <= DARK_MAX_THICKNESS.
+    """
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    out = np.zeros_like(mask)
+    for label in range(1, num):  # 0 — фон
+        w = stats[label, cv2.CC_STAT_WIDTH]
+        h = stats[label, cv2.CC_STAT_HEIGHT]
+        area = stats[label, cv2.CC_STAT_AREA]
+        long_side = max(w, h)
+        if long_side < config.DARK_MIN_LENGTH:
+            continue
+        thickness = area / float(long_side) if long_side else 0.0
+        if thickness > config.DARK_MAX_THICKNESS:
+            continue
+        out[labels == label] = 255
+    return out
 
 
 def _remove_small_components(mask, min_area):

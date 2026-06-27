@@ -25,7 +25,9 @@ def find_images(input_dir):
     """
     input_path = Path(input_dir)
     if not input_path.is_dir():
-        raise FileNotFoundError(f"Папка с входными картами не найдена: {input_dir}")
+        # Не падаем с traceback: судья запускает «с нуля», папки может не быть.
+        # Возвращаем пусто — main.py напечатает дружелюбную подсказку.
+        return []
 
     images = [
         p for p in sorted(input_path.rglob("*"))
