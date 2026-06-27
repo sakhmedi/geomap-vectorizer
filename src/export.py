@@ -17,7 +17,7 @@ from pathlib import Path
 from src import io_utils
 
 
-def features_to_geojson(features, map_name, width, height):
+def features_to_geojson(features, map_name, width, height, crop_offset=(0, 0), cropped=False):
     """Собрать GeoJSON FeatureCollection из списка фич векторизации."""
     geojson_features = []
     for f in features:
@@ -45,6 +45,10 @@ def features_to_geojson(features, map_name, width, height):
             "source_map": map_name,
             "image_width_px": width,
             "image_height_px": height,
+            "cropped_to_map_border": cropped,
+            # Если карта была обрезана, координаты считаются от рамки. Чтобы вернуться
+            # к координатам ужатого скана, прибавьте crop_offset_xy к (x, y).
+            "crop_offset_xy": [int(crop_offset[0]), int(crop_offset[1])],
             "note": "Pixel coordinates (x right, y down). Georeferencing is Track 3.",
         },
         "features": geojson_features,

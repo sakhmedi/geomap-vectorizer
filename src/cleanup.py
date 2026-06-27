@@ -34,7 +34,9 @@ def cleanup(extracted, saver):
 
     # Чистим каждую цветную маску по отдельности.
     for color_name, spec in extracted["color_masks"].items():
-        clean = _clean_mask(spec["mask"], kernel)
+        # Для разломов (линий) включаем «мост», чтобы сшить разорванные штрихи.
+        is_fault = spec["type"] == "fault"
+        clean = _clean_mask(spec["mask"], kernel, bridge=is_fault)
         clean_color_masks[color_name] = {"mask": clean, "type": spec["type"]}
         saver.save(f"clean_{color_name}", clean)
 
@@ -62,12 +64,24 @@ def cleanup(extracted, saver):
     return {"color_masks": clean_color_masks, "combined": combined, "canny": clean_canny}
 
 
-def _clean_mask(mask, kernel):
-    """Применить OPEN -> CLOSE -> фильтр мелких компонентов к одной маске."""
+def _clean_mask(mask, kernel, bridge=False):
+    """
+    Применить OPEN -> CLOSE -> (опц. МОСТ) -> фильтр мелких компонентов к одной маске.
+    bridge=True добавляет ещё один CLOSE с бОльшим ядром, чтобы сшить разорванные линии.
+    """
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel,
                               iterations=config.MORPH_OPEN_ITERATIONS)
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel,
                               iterations=config.MORPH_CLOSE_ITERATIONS)
+
+    if bridge and config.BRIDGE_KERNEL_SIZE:
+        bridge_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (config.BRIDGE_KERNEL_SIZE, config.BRIDGE_KERNEL_SIZE),
+        )
+        closed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, bridge_kernel,
+                                  iterations=config.BRIDGE_ITERATIONS)
+
     filtered = _remove_small_components(closed, config.MIN_COMPONENT_AREA)
     return filtered
 

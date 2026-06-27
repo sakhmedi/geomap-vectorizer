@@ -84,6 +84,11 @@ class DebugSaver:
         self.counter = 0
         self.map_dir = Path(debug_root) / map_name
         if self.enabled:
+            # Чистим папку карты от кадров прошлого прогона, иначе старые номера
+            # перемешиваются с новыми и сбивают с толку.
+            if self.map_dir.exists():
+                for old in self.map_dir.glob("*.png"):
+                    old.unlink()
             ensure_dir(self.map_dir)
 
     def save(self, label, image):

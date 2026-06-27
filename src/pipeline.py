@@ -55,7 +55,11 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name, deb
     # --- Этап 6: экспорт в GeoJSON ---
     # prepared["color"] мог быть ужат — берём его размер, чтобы координаты совпадали с векторами.
     out_h, out_w = prepared["color"].shape[:2]
-    geojson = export.features_to_geojson(features, map_name, out_w, out_h)
+    geojson = export.features_to_geojson(
+        features, map_name, out_w, out_h,
+        crop_offset=prepared["crop_offset"],
+        cropped=prepared["cropped"],
+    )
     export.write_geojson(geojson, output_dir, map_name)
 
     return {
