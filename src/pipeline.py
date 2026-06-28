@@ -21,7 +21,8 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
       {name, status, ...}
     status:
       - "failed"  : файл не прочитался (битый/не картинка)
-      - "ok"      : обработка прошла (пока что просто загрузка)
+      - "ok"      : карта прошла весь конвейер (вектора + экспорт); качество
+                    отражают поля confidence/georeferenced, а не status
     """
     map_name = io_utils.get_map_name(image_path, input_dir)
 
