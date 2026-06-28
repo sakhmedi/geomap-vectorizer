@@ -74,6 +74,12 @@ def _clean_mask(mask, kernel, bridge=False, line_only=False):
     line_only=True дополнительно оставляет только длинные тонкие компоненты (для
     тёмных линий: отсекает буквы, штриховку рельефа и заливки).
     """
+    # Гард от краевых пятен — РАНО, до морфологии: пока пятно старения ещё одно
+    # связное пятно, касающееся края, оно убирается целиком. Если ждать до фильтра
+    # площадей, OPEN раздробит пятно на куски, и часть «отлипнет» от края, уцелев.
+    if config.DROP_BORDER_TOUCHING:
+        mask = _drop_border_components(mask)
+
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel,
                               iterations=config.MORPH_OPEN_ITERATIONS)
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel,
@@ -92,39 +98,71 @@ def _clean_mask(mask, kernel, bridge=False, line_only=False):
     return _remove_small_components(closed, config.MIN_COMPONENT_AREA)
 
 
+def _border_tolerance(mask):
+    """Сколько пикселей от края считаем «касанием» (доля от длинной стороны)."""
+    h, w = mask.shape[:2]
+    return max(1, int(round(config.BORDER_TOUCH_TOLERANCE_FRAC * max(h, w))))
+
+
+def _apply_label_keep(labels, keep):
+    """Собрать маску из меток, которые надо оставить (векторно, без цикла по пикселям)."""
+    keep[0] = False  # метка 0 — фон, никогда не оставляем
+    return np.where(keep[labels], 255, 0).astype(np.uint8)
+
+
+def _border_touch_flags(stats, w_img, h_img, tol):
+    """Булев вектор по меткам: True там, где bbox компоненты касается края кадра."""
+    x = stats[:, cv2.CC_STAT_LEFT]
+    y = stats[:, cv2.CC_STAT_TOP]
+    w = stats[:, cv2.CC_STAT_WIDTH]
+    h = stats[:, cv2.CC_STAT_HEIGHT]
+    return ((x <= tol) | (y <= tol)
+            | ((x + w) >= (w_img - tol)) | ((y + h) >= (h_img - tol)))
+
+
+def _drop_border_components(mask):
+    """
+    Убрать ВСЕ связные компоненты, касающиеся края кадра (независимо от размера).
+    Применяется к «сырой» маске: цельное краевое пятно/рамка/поля уходят одним куском,
+    а внутренние объекты (разломы, границы) остаются нетронутыми.
+    """
+    h_img, w_img = mask.shape[:2]
+    tol = _border_tolerance(mask)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    keep = ~_border_touch_flags(stats, w_img, h_img, tol)
+    return _apply_label_keep(labels, keep)
+
+
 def _keep_line_like(mask):
     """
     Оставить только ДЛИННЫЕ и ТОНКИЕ связные компоненты (линии), выкинув короткие
     кляксы и толстые пятна. Критерий: длинная сторона bbox >= DARK_MIN_LENGTH И
     средняя толщина (площадь / длинная сторона) <= DARK_MAX_THICKNESS.
     """
+    h_img, w_img = mask.shape[:2]
+    tol = _border_tolerance(mask)
     num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    out = np.zeros_like(mask)
-    for label in range(1, num):  # 0 — фон
-        w = stats[label, cv2.CC_STAT_WIDTH]
-        h = stats[label, cv2.CC_STAT_HEIGHT]
-        area = stats[label, cv2.CC_STAT_AREA]
-        long_side = max(w, h)
-        if long_side < config.DARK_MIN_LENGTH:
-            continue
-        thickness = area / float(long_side) if long_side else 0.0
-        if thickness > config.DARK_MAX_THICKNESS:
-            continue
-        out[labels == label] = 255
-    return out
+    w = stats[:, cv2.CC_STAT_WIDTH]
+    h = stats[:, cv2.CC_STAT_HEIGHT]
+    area = stats[:, cv2.CC_STAT_AREA]
+    long_side = np.maximum(w, h)
+    thickness = np.divide(area, long_side, out=np.zeros(len(area), dtype=float),
+                          where=long_side > 0)
+    keep = (long_side >= config.DARK_MIN_LENGTH) & (thickness <= config.DARK_MAX_THICKNESS)
+    if config.DROP_BORDER_TOUCHING:
+        keep &= ~_border_touch_flags(stats, w_img, h_img, tol)
+    return _apply_label_keep(labels, keep)
 
 
 def _remove_small_components(mask, min_area):
     """
-    Убрать связные белые области площадью меньше min_area пикселей.
-    Так уходят крапинки и мелкие буквы, а длинные линии остаются.
+    Убрать связные белые области площадью меньше min_area пикселей (крапинки, буквы),
+    а также краевые компоненты (пятна старения/рамка). Длинные линии внутри остаются.
     """
-    # connectedComponentsWithStats нумерует все «острова» белого и даёт их площади.
+    h_img, w_img = mask.shape[:2]
+    tol = _border_tolerance(mask)
     num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    out = np.zeros_like(mask)
-    # Метка 0 — это фон, его пропускаем (начинаем с 1).
-    for label in range(1, num):
-        area = stats[label, cv2.CC_STAT_AREA]
-        if area >= min_area:
-            out[labels == label] = 255
-    return out
+    keep = stats[:, cv2.CC_STAT_AREA] >= min_area
+    if config.DROP_BORDER_TOUCHING:
+        keep &= ~_border_touch_flags(stats, w_img, h_img, tol)
+    return _apply_label_keep(labels, keep)

@@ -52,7 +52,7 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
     features = vectorize.vectorize(cleaned, prepared, saver)
 
     # --- Триаж: насколько уверены в результате ---
-    confidence, reason = _assess_confidence(cleaned["combined"], len(features))
+    confidence, reason = _assess_confidence(cleaned["combined"], features)
 
     # --- Этап 5b: геопривязка (пиксели -> WGS84), если задан AOI ---
     # Привязку строим в той же системе пикселей, что и вектора (prepared["color"]).
@@ -90,16 +90,39 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
     }
 
 
-def _assess_confidence(combined_mask, num_features):
+def _assess_confidence(combined_mask, features):
     """
-    Простая эвристика уверенности по доле «найденных» пикселей и числу объектов.
+    Простая эвристика уверенности по доле «найденных» пикселей, числу объектов и тому,
+    не жмутся ли объекты к краю кадра (признак пятен/рамки, а не геологии).
     Возвращает (confidence, reason): confidence — 'ok' или 'low'.
     """
-    total = combined_mask.shape[0] * combined_mask.shape[1]
+    h, w = combined_mask.shape[:2]
+    total = h * w
     coverage = cv2.countNonZero(combined_mask) / total if total else 0.0
+    num_features = len(features)
 
     if num_features == 0:
         return "low", "объектов не найдено (вероятно калька/серый чертёж)"
     if coverage < config.LOW_CONFIDENCE_COVERAGE:
         return "low", "очень мало цветных пикселей (вероятно слабый/выцветший скан)"
+
+    edge_frac = _edge_feature_fraction(features, w, h)
+    if edge_frac >= config.EDGE_NOISE_FRAC:
+        return "low", "много объектов у края (вероятно пятна старения/рамка, не геология)"
     return "ok", ""
+
+
+def _edge_feature_fraction(features, w, h):
+    """Доля объектов, чей центр лежит в краевой полосе кадра (EDGE_BAND_FRAC по сторонам)."""
+    if not features:
+        return 0.0
+    band_x = config.EDGE_BAND_FRAC * w
+    band_y = config.EDGE_BAND_FRAC * h
+    edge = 0
+    for f in features:
+        pts = f["points"]
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        if cx < band_x or cx > w - band_x or cy < band_y or cy > h - band_y:
+            edge += 1
+    return edge / len(features)
