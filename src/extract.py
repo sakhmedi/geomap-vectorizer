@@ -17,11 +17,12 @@ import numpy as np
 from src import config, crop
 
 
-def extract(prepared, profile_name, saver):
+def extract(prepared, profile_name, saver, use_sam=False):
     """
     prepared — словарь из preprocess: {"color": BGR, "gray": серый}.
     profile_name — какой набор цветов брать из config.PROFILES.
     saver — DebugSaver для промежуточных кадров.
+    use_sam — если True и SAM доступен, дополнить цветовые маски сегментами SAM.
 
     Возвращает:
       {
@@ -47,6 +48,24 @@ def extract(prepared, profile_name, saver):
         color_masks[color_name] = {"mask": mask, "type": spec["type"]}
         combined = cv2.bitwise_or(combined, mask)
         saver.save(f"mask_{color_name}", mask)
+
+    # --- Ветка 1c (опц.): SAM как альтернативный сегментатор границ слоёв ---
+    # Тяжёлый путь, только под флагом. Если SAM/torch/чекпойнт недоступны —
+    # sam_extract печатает подсказку и возвращает None (тихий фолбэк на классику).
+    if use_sam:
+        from src import sam_extract
+        sam_masks = sam_extract.extract_color_masks(color_image, profile, saver)
+        if sam_masks:
+            for color_name, sam_mask in sam_masks.items():
+                if color_name in color_masks:
+                    # Объединяем с цветовой маской того же класса (SAM дополняет HSV).
+                    color_masks[color_name]["mask"] = cv2.bitwise_or(
+                        color_masks[color_name]["mask"], sam_mask)
+                else:
+                    ctype = profile.get(color_name, {}).get("type", "boundary")
+                    color_masks[color_name] = {"mask": sam_mask, "type": ctype}
+                combined = cv2.bitwise_or(combined, sam_mask)
+            saver.save("mask_sam_combined", combined)
 
     # --- Ветка 1b: тёмные линии (разломы чернилами/карандашом) ---
     # На многих картах разломы — тёмные, а не цветные; HSV их не ловит.
@@ -105,6 +124,11 @@ def _extract_dark_lines(gray):
     blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
     _, mask = cv2.threshold(blackhat, config.DARK_THRESHOLD, 255, cv2.THRESH_BINARY)
     return mask
+
+
+def color_mask(hsv, ranges):
+    """Публичная обёртка над _mask_for_color (нужна legend.py для тех же порогов)."""
+    return _mask_for_color(hsv, ranges)
 
 
 def _mask_for_color(hsv, ranges):

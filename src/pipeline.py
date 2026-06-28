@@ -11,11 +11,12 @@ pipeline.py — обработка ОДНОЙ карты от начала до 
 
 import cv2
 
-from src import cleanup, config, export, extract, georef, io_utils, preprocess, vectorize
+from src import (cleanup, config, export, extract, georef, io_utils, legend,
+                 preprocess, vectorize)
 
 
 def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
-                debug_enabled=True, aoi_path=None):
+                debug_enabled=True, aoi_path=None, use_sam=False):
     """
     Прогнать одну карту через пайплайн. Возвращает dict с результатом:
       {name, status, ...}
@@ -41,8 +42,8 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
     prepared = preprocess.preprocess(image, saver)
     # prepared["color"] -> для HSV, prepared["gray"] -> для краёв.
 
-    # --- Этап 3: выделение объектов (HSV + Canny) ---
-    extracted = extract.extract(prepared, profile_name, saver)
+    # --- Этап 3: выделение объектов (HSV + Canny, опц. SAM) ---
+    extracted = extract.extract(prepared, profile_name, saver, use_sam=use_sam)
     # extracted["color_masks"], extracted["canny"], extracted["combined"]
 
     # --- Этап 4: очистка масок (морфология + фильтр мелочи) ---
@@ -51,6 +52,10 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
 
     # --- Этап 5: векторизация (контуры -> полилинии) ---
     features = vectorize.vectorize(cleaned, prepared, saver)
+
+    # --- Этап 5a: извлечение легенды (образцы цвета -> класс слоя) ---
+    legend_entries, legend_summary = legend.extract_legend(
+        prepared["color"], profile_name, features=features, saver=saver)
 
     # --- Триаж: насколько уверены в результате ---
     confidence, reason = _assess_confidence(cleaned["combined"], features)
@@ -68,9 +73,11 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
         cropped=prepared["cropped"],
         geo_transform=geo_transform,
         geo_info=geo_info,
+        legend_summary=legend_summary,
     )
     export.write_geojson(geojson, output_dir, map_name)
     export.write_shapefile(geojson, output_dir, map_name)
+    export.write_legend(legend_entries, legend_summary, output_dir, map_name)
 
     # Причина в сводке: сначала про привязку (если её нет), иначе — про уверенность.
     summary_reason = reason
@@ -83,6 +90,7 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
         "width": width,
         "height": height,
         "num_features": len(features),
+        "num_legend": len(legend_entries),
         "confidence": confidence,
         "reason": summary_reason,
         "georeferenced": geo_info.get("georeferenced", False),

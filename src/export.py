@@ -37,7 +37,7 @@ def _feature_coordinates(feature, geo_transform):
 
 def features_to_geojson(features, map_name, width, height,
                         crop_offset=(0, 0), cropped=False,
-                        geo_transform=None, geo_info=None):
+                        geo_transform=None, geo_info=None, legend_summary=None):
     """Собрать GeoJSON FeatureCollection из списка фич векторизации."""
     georeferenced = geo_transform is not None
     geo_info = geo_info or {}
@@ -86,6 +86,9 @@ def features_to_geojson(features, map_name, width, height,
     else:
         metadata["georef_reason"] = geo_info.get("reason", "")
 
+    if legend_summary:
+        metadata["legend"] = legend_summary
+
     return {
         "type": "FeatureCollection",
         "crs": crs,
@@ -101,6 +104,28 @@ def write_geojson(geojson, output_dir, map_name):
     # ensure_ascii=False — чтобы кириллица в именах писалась нормально, не \uXXXX.
     text = json.dumps(geojson, ensure_ascii=False, indent=2)
     out_path.write_text(text, encoding="utf-8")
+    return out_path
+
+
+def write_legend(entries, summary, output_dir, map_name):
+    """
+    Записать легенду карты в output/<map_name>.legend.json (если есть образцы).
+    Возвращает путь или None. Это отдельный сайдкар, чтобы не раздувать GeoJSON
+    геометрии; сводка по цветам дополнительно лежит и в metadata.legend.
+    """
+    if not entries:
+        return None
+    io_utils.ensure_dir(output_dir)
+    out_path = Path(output_dir) / f"{map_name}.legend.json"
+    payload = {
+        "source_map": map_name,
+        "note": ("Цветные образцы легенды (HSV) и связь с векторами того же класса. "
+                 "Без OCR подписей (кириллица) — это задача Трека 1."),
+        "summary": summary,
+        "swatches": entries,
+    }
+    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
     return out_path
 
 
@@ -155,7 +180,7 @@ def write_summary(results, output_dir):
     """
     io_utils.ensure_dir(output_dir)
     out_path = Path(output_dir) / "_summary.csv"
-    columns = ["name", "status", "confidence", "num_features",
+    columns = ["name", "status", "confidence", "num_features", "num_legend",
                "georeferenced", "crs", "georef_rms_px", "reason"]
 
     with out_path.open("w", newline="", encoding="utf-8") as fh:
@@ -167,6 +192,7 @@ def write_summary(results, output_dir):
                 "status": r.get("status", ""),
                 "confidence": r.get("confidence", ""),
                 "num_features": r.get("num_features", 0),
+                "num_legend": r.get("num_legend", 0),
                 "georeferenced": "yes" if r.get("georeferenced") else "no",
                 "crs": r.get("crs", ""),
                 "georef_rms_px": r.get("georef_rms_px", ""),

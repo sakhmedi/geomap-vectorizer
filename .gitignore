@@ -14,3 +14,7 @@ output/*
 !output/.gitkeep
 input/*
 !input/.gitkeep
+
+# Чекпойнты SAM (большие, скачиваются отдельно — см. requirements-sam.txt)
+models/*.pth
+models/*.pt

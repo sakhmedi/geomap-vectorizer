@@ -48,6 +48,9 @@ def parse_args():
                              "(пиксели -> WGS84). Если не задан — координаты пиксельные")
     parser.add_argument("--no-debug", action="store_true",
                         help="не сохранять промежуточные картинки (быстрее)")
+    parser.add_argument("--use-sam", action="store_true", default=config.USE_SAM,
+                        help="опц.: дополнить выделение объектов сегментами SAM "
+                             "(требует requirements-sam.txt и чекпойнт; иначе фолбэк на HSV)")
     return parser.parse_args()
 
 
@@ -73,7 +76,8 @@ def main():
         return
 
     print(f"Найдено карт: {len(images)}. Профиль: {args.profile}. "
-          f"Debug: {'вкл' if debug_enabled else 'выкл'}")
+          f"Debug: {'вкл' if debug_enabled else 'выкл'}. "
+          f"SAM: {'вкл' if args.use_sam else 'выкл'}")
     print("-" * 60)
 
     results = []
@@ -86,6 +90,7 @@ def main():
             profile_name=args.profile,
             debug_enabled=debug_enabled,
             aoi_path=args.aoi,
+            use_sam=args.use_sam,
         )
         results.append(result)
 
@@ -101,9 +106,10 @@ def main():
     failed = len(results) - ok
     low = sum(1 for r in results if r.get("confidence") == "low")
     geo = sum(1 for r in results if r.get("georeferenced"))
+    legend_total = sum(r.get("num_legend", 0) for r in results)
     print("-" * 60)
     print(f"Готово. Успешно: {ok}, пропущено: {failed}, low_confidence: {low}, "
-          f"геопривязано (WGS84): {geo}.")
+          f"геопривязано (WGS84): {geo}, образцов легенды: {legend_total}.")
     print(f"GeoJSON -> {args.output}/  |  Сводка -> {summary_path}")
 
 

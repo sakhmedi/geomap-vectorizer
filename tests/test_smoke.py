@@ -66,3 +66,64 @@ def test_summary_written(tmp_path):
 def test_missing_input_dir_is_graceful():
     # Несуществующая папка -> пустой список, а НЕ исключение.
     assert io_utils.find_images("__no_such_dir__") == []
+
+
+@pytest.mark.skipif(not EXAMPLE.exists(), reason="нет examples/example_original.jpg")
+def test_legend_extraction_runs_and_links_features():
+    # Извлечение легенды не должно падать и должно возвращать согласованные структуры.
+    from src import io_utils as iou
+    from src import legend, preprocess, extract, cleanup, vectorize
+
+    image = iou.load_image(str(EXAMPLE))
+    saver = iou.DebugSaver("dbg", "x", enabled=False)
+    prepared = preprocess.preprocess(image, saver)
+    extracted = extract.extract(prepared, config.DEFAULT_PROFILE, saver)
+    cleaned = cleanup.cleanup(extracted, saver)
+    features = vectorize.vectorize(cleaned, prepared, saver)
+
+    entries, summary = legend.extract_legend(
+        prepared["color"], config.DEFAULT_PROFILE, features=features, saver=saver)
+
+    assert isinstance(entries, list)
+    assert isinstance(summary, list)
+    # Каждый образец описан полным набором полей.
+    for e in entries:
+        assert set(e) >= {"color", "type", "bbox_px", "mean_hsv", "area_px"}
+    # Сводка ссылается только на цвета, у которых реально нашлись образцы.
+    for s in summary:
+        assert s["num_swatches"] >= 1
+
+
+def test_sam_unavailable_is_graceful():
+    # Без torch/чекпойнта SAM недоступен, но это не ошибка — просто False.
+    from src import sam_extract
+    assert isinstance(sam_extract.available(), bool)
+
+
+def test_legend_detects_swatches_not_lines():
+    """
+    Детерминированная проверка на синтетике: рисуем плотные цветные квадраты
+    (образцы легенды) и тонкую красную линию (разлом). Извлечение должно поймать
+    квадраты как образцы и НЕ принять линию за образец.
+    """
+    import cv2
+    import numpy as np
+    from src import io_utils as iou
+    from src import legend
+
+    # Светлый «бумажный» фон.
+    img = np.full((400, 400, 3), 235, dtype=np.uint8)
+    # Плотные образцы (BGR): красный, зелёный, синий квадраты ~20x20.
+    cv2.rectangle(img, (30, 30), (52, 52), (40, 40, 200), -1)    # красный
+    cv2.rectangle(img, (30, 70), (52, 92), (40, 170, 40), -1)    # зелёный
+    cv2.rectangle(img, (30, 110), (52, 132), (200, 60, 40), -1)  # синий
+    # Тонкая красная линия — это НЕ образец легенды (низкая плотность заливки).
+    cv2.line(img, (120, 200), (360, 230), (40, 40, 200), 2)
+
+    saver = iou.DebugSaver("dbg", "syn", enabled=False)
+    entries, summary = legend.extract_legend(img, "geological", features=[], saver=saver)
+
+    colors = {e["color"] for e in entries}
+    assert {"red", "green", "blue"} <= colors, f"ожидали 3 образца, нашли {colors}"
+    # Тонкая линия не должна добавить лишних «красных образцов» (только квадрат).
+    assert sum(1 for e in entries if e["color"] == "red") == 1
