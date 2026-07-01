@@ -1,12 +1,12 @@
 """
-preprocess.py — этап 2: подготовка скана перед выделением объектов.
+preprocess.py — stage 2: preparing the scan before feature extraction.
 
-Карты выцветшие и шумные, поэтому перед анализом их надо «причесать».
-На выходе отдаём ДВА варианта одной карты:
-  - color : цветной (ужатый + усиленный контраст) — пойдёт в HSV (этап 3),
-  - gray  : серый (сглаженный) — пойдёт в поиск краёв Canny (этап 3).
+The maps are faded and noisy, so they must be "tidied up" before analysis.
+On output we return TWO variants of the same map:
+  - color : the color version (resized + enhanced contrast) — goes into HSV (stage 3),
+  - gray  : the gray version (smoothed) — goes into Canny edge detection (stage 3).
 
-Каждый шаг сохраняет debug-кадр, чтобы эффект было видно глазами.
+Each step saves a debug frame, so the effect can be seen by eye.
 """
 
 import cv2
@@ -16,28 +16,28 @@ from src import config, crop
 
 def preprocess(image, saver):
     """
-    Принять исходный цветной кадр (BGR), вернуть словарь:
-        {"color": <BGR для HSV>, "gray": <серый для краёв>}
-    saver — DebugSaver, сюда падают промежуточные кадры 01..03.
+    Take the source color frame (BGR), return a dict:
+        {"color": <BGR for HSV>, "gray": <gray for edges>}
+    saver — DebugSaver, the intermediate frames 01..03 go here.
     """
-    # --- Шаг 2.1: ужать большие сканы ---
-    # Меньше пикселей = быстрее обработка и меньше мелкого шума.
+    # --- Step 2.1: shrink large scans ---
+    # Fewer pixels = faster processing and less fine noise.
     resized = _resize_max_side(image, config.MAX_IMAGE_SIDE)
     saver.save("resized", resized)
 
-    # --- Шаг 2.1b: обрезать до рамки карты (безопасно, если найдена) ---
+    # --- Step 2.1b: crop to the map frame (safe if found) ---
     cropped_img, crop_offset, cropped = crop.crop_to_map(resized, saver)
 
-    # --- Шаг 2.2: усилить контраст (CLAHE) ---
-    # Выцветшие цвета становятся ярче/насыщеннее, HSV-порогам легче их поймать.
-    # CLAHE применяем к яркости (канал L в пространстве LAB), чтобы НЕ испортить
-    # сами цвета (тон остаётся, меняется только контраст по яркости).
+    # --- Step 2.2: enhance contrast (CLAHE) ---
+    # Faded colors become brighter/more saturated, easier for HSV thresholds to catch.
+    # We apply CLAHE to the brightness (the L channel of the LAB space) so as NOT to
+    # spoil the colors themselves (the hue stays, only the brightness contrast changes).
     enhanced = _apply_clahe_color(cropped_img)
     saver.save("clahe", enhanced)
 
-    # --- Шаг 2.3: серый + денойз ---
-    # Серый нужен для поиска краёв. Денойз убирает зерно бумаги и слабый карандаш,
-    # чтобы Canny не принимал их за «края».
+    # --- Step 2.3: gray + denoise ---
+    # Gray is needed for edge detection. Denoising removes paper grain and faint pencil,
+    # so that Canny does not mistake them for "edges".
     gray = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
     denoised = _denoise_gray(gray, config.DENOISE_STRENGTH)
     saver.save("denoised", denoised)
@@ -45,13 +45,13 @@ def preprocess(image, saver):
     return {
         "color": enhanced,
         "gray": denoised,
-        "crop_offset": crop_offset,   # (x0, y0) смещение обрезки в координатах ресайза
-        "cropped": cropped,           # True, если реально обрезали
+        "crop_offset": crop_offset,   # (x0, y0) crop offset in resized coordinates
+        "cropped": cropped,           # True if we actually cropped
     }
 
 
 def _resize_max_side(image, max_side):
-    """Ужать так, чтобы длинная сторона была не больше max_side. 0 = не трогать."""
+    """Shrink so the long side is no more than max_side. 0 = leave as is."""
     if not max_side:
         return image
     h, w = image.shape[:2]
@@ -64,7 +64,7 @@ def _resize_max_side(image, max_side):
 
 
 def _apply_clahe_color(image):
-    """Усилить контраст по яркости, сохранив цвета (через пространство LAB)."""
+    """Enhance brightness contrast while keeping the colors (via the LAB space)."""
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(
@@ -77,8 +77,8 @@ def _apply_clahe_color(image):
 
 
 def _denoise_gray(gray, strength):
-    """Сгладить серый кадр медианным фильтром. strength=0 -> не трогать."""
+    """Smooth the gray frame with a median filter. strength=0 -> leave as is."""
     if not strength or strength < 3:
         return gray
-    ksize = strength if strength % 2 == 1 else strength + 1  # ядро должно быть нечётным
+    ksize = strength if strength % 2 == 1 else strength + 1  # the kernel must be odd
     return cv2.medianBlur(gray, ksize)

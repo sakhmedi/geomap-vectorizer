@@ -1,20 +1,20 @@
 """
-legend.py — извлечение легенды карты (Трек 2: «извлечение легенды»).
+legend.py — map legend extraction (Track 2: "legend extraction").
 
-Легенда — это таблица «образец цвета -> название геологического слоя». Прошлый
-этап (extract) намеренно ОТСЕКАЕТ легенду маской по рамке, чтобы её цветные
-образцы не превращались в ложные вектора. Здесь мы делаем обратное: отдельным
-проходом находим в легенде цветные ОБРАЗЦЫ и связываем каждый с классом объекта
-(fault/boundary) и с уже извлечёнными векторами того же цвета.
+A legend is a table "color swatch -> geological layer name". The previous stage
+(extract) deliberately CUTS the legend off with the frame mask, so that its colored
+swatches do not turn into false vectors. Here we do the opposite: in a separate pass
+we find the colored SWATCHES in the legend and link each one to a feature class
+(fault/boundary) and to the already extracted vectors of the same color.
 
-Как отличаем образец легенды от линии разлома (оба, например, красные):
-  - образец легенды — ПЛОТНАЯ компактная заливка (area / area(bbox) высокое),
-  - линия разлома — тонкая и извилистая (это отношение низкое).
-Плюс образцы обычно лежат ВНЕ рамки карты (на полях) — это второй фильтр.
+How we tell a legend swatch from a fault line (both may be, say, red):
+  - a legend swatch is a DENSE compact fill (area / area(bbox) is high),
+  - a fault line is thin and winding (this ratio is low).
+Plus swatches usually lie OUTSIDE the map frame (on the margins) — that is the second filter.
 
-OCR подписей слоёв (кириллица) — задача Трека 1; здесь без OCR, чтобы остаться
-лёгким и воспроизводимым «из коробки». Результат: список образцов с их цветом,
-классом, bbox и числом связанных векторов на карте.
+OCR of the layer labels (Cyrillic) is a Track 1 task; here we skip OCR to stay
+lightweight and reproducible out of the box. Result: a list of swatches with their color,
+class, bbox and the number of linked vectors on the map.
 """
 
 import cv2
@@ -25,17 +25,17 @@ from src import config, crop, extract
 
 def extract_legend(color_image, profile_name, features=None, saver=None):
     """
-    Найти образцы легенды на карте.
+    Find the legend swatches on the map.
 
-    color_image — цветной (BGR) кадр (тот же, что идёт в HSV-извлечение).
-    profile_name — профиль цветов из config.PROFILES.
-    features — список векторов из vectorize (для связи «образец -> сколько линий»).
-    saver — DebugSaver (нарисуем найденные образцы для проверки глазами).
+    color_image — the color (BGR) frame (the same one that goes into HSV extraction).
+    profile_name — the color profile from config.PROFILES.
+    features — the list of vectors from vectorize (to link "swatch -> how many lines").
+    saver — DebugSaver (we'll draw the found swatches for eyeballing).
 
-    Возвращает (entries, summary):
-      entries — список образцов: {color, type, bbox_px, mean_hsv, area_px, outside_frame}
-      summary — сводка по цветам: [{color, type, num_swatches, num_map_features}]
-    Никогда не падает: при любой проблеме возвращает пустые списки.
+    Returns (entries, summary):
+      entries — a list of swatches: {color, type, bbox_px, mean_hsv, area_px, outside_frame}
+      summary — a per-color summary: [{color, type, num_swatches, num_map_features}]
+    Never crashes: on any problem it returns empty lists.
     """
     if not config.EXTRACT_LEGEND:
         return [], []
@@ -68,10 +68,10 @@ def extract_legend(color_image, profile_name, features=None, saver=None):
 
 
 def _swatches_from_mask(mask, hsv, color_name, color_type, frame, img_area):
-    """Вытащить из одной цветовой маски компоненты, похожие на образцы легенды."""
+    """Pull the components that look like legend swatches out of one color mask."""
     num, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     found = []
-    for i in range(1, num):  # 0 — фон
+    for i in range(1, num):  # 0 is the background
         area = int(stats[i, cv2.CC_STAT_AREA])
         if area < config.LEGEND_MIN_SWATCH_AREA_FRAC * img_area:
             continue
@@ -84,7 +84,7 @@ def _swatches_from_mask(mask, hsv, color_name, color_type, frame, img_area):
         bbox_area = w * h
         if bbox_area == 0:
             continue
-        # Плотность заливки: образец легенды залит почти целиком, линия — нет.
+        # Fill density: a legend swatch is filled almost entirely, a line is not.
         if area / bbox_area < config.LEGEND_MIN_FILL_RATIO:
             continue
         aspect = w / h if h else 0.0
@@ -107,16 +107,16 @@ def _swatches_from_mask(mask, hsv, color_name, color_type, frame, img_area):
 
 
 def _is_outside_frame(frame, cx, cy):
-    """True, если точка лежит ВНЕ четырёхугольника рамки. Без рамки — считаем True."""
+    """True if the point lies OUTSIDE the frame quadrilateral. Without a frame — treat as True."""
     if frame is None:
         return True
     quad = np.asarray(frame, dtype=np.float32).reshape(-1, 1, 2)
-    # >0 внутри, <0 снаружи, =0 на границе.
+    # >0 inside, <0 outside, =0 on the boundary.
     return cv2.pointPolygonTest(quad, (cx, cy), False) < 0
 
 
 def _mean_hsv(hsv, labels, label_id):
-    """Средний HSV по пикселям компоненты (для отчёта/отладки порогов)."""
+    """The mean HSV over the component's pixels (for reporting/debugging the thresholds)."""
     sel = labels == label_id
     if not np.any(sel):
         return [0, 0, 0]
@@ -125,7 +125,7 @@ def _mean_hsv(hsv, labels, label_id):
 
 
 def _summarize(entries, profile, features):
-    """Сводка по цветам: сколько образцов и сколько векторов того же цвета на карте."""
+    """Per-color summary: how many swatches and how many vectors of the same color on the map."""
     feat_counts = {}
     for f in features:
         feat_counts[f.get("color")] = feat_counts.get(f.get("color"), 0) + 1
@@ -145,7 +145,7 @@ def _summarize(entries, profile, features):
 
 
 def _draw_overlay(color_image, entries):
-    """Обвести найденные образцы легенды (для визуальной проверки в debug/)."""
+    """Box the found legend swatches (for visual inspection in debug/)."""
     overlay = color_image.copy()
     for e in entries:
         x, y, w, h = e["bbox_px"]

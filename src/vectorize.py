@@ -1,14 +1,14 @@
 """
-vectorize.py — этап 5: из чистой бинарной маски делаем векторы (списки точек).
+vectorize.py — stage 5: turn the clean binary mask into vectors (lists of points).
 
-Идея: cv2.findContours обводит каждое белое пятно ломаной линией (контуром).
-Затем cv2.approxPolyDP выкидывает лишние точки — линия становится гладкой и лёгкой.
+Idea: cv2.findContours traces each white blob with a polyline (a contour).
+Then cv2.approxPolyDP discards excess points — the line becomes smooth and light.
 
-Результат — список «фич»: каждая фича = одна линия с её точками (в пикселях),
-типом (fault/boundary) и цветом-источником. Это уже почти GeoJSON, только без файла.
+The result is a list of "features": each feature = one line with its points (in pixels),
+type (fault/boundary) and source color. This is almost GeoJSON already, just without a file.
 
-Координаты здесь пиксельные: (x вправо, y вниз). Перевод в WGS84 делает отдельный
-этап геопривязки (src/georef.py) уже над этими точками, если задан AOI.
+The coordinates here are pixel coordinates: (x right, y down). Conversion to WGS84 is done
+by a separate georeferencing stage (src/georef.py) over these points, if an AOI is given.
 """
 
 import cv2
@@ -16,8 +16,8 @@ import numpy as np
 
 from src import config
 
-# scikit-image нужен только для осевых линий (скелетизация). Если его нет —
-# тихо откатываемся на контурный путь (петли), пайплайн не ломается.
+# scikit-image is needed only for the centerlines (skeletonization). If it is absent —
+# we silently fall back to the contour path (loops), the pipeline does not break.
 try:
     from skimage.morphology import skeletonize as _sk_skeletonize
     _HAS_SKIMAGE = True
@@ -27,14 +27,14 @@ except ImportError:  # pragma: no cover
 
 def vectorize(cleaned, prepared, saver):
     """
-    cleaned — словарь из cleanup: {"color_masks", "combined", "canny"}.
-    prepared — нужен только цветной кадр для рисования overlay.
-    Возвращает список фич:
+    cleaned — the dict from cleanup: {"color_masks", "combined", "canny"}.
+    prepared — only the color frame is needed, for drawing the overlay.
+    Returns a list of features:
       [{"points": [(x, y), ...], "type": "fault", "color": "red", "length_px": float}, ...]
     """
     features = []
 
-    # Векторизуем каждую очищенную цветную маску.
+    # Vectorize each cleaned color mask.
     for color_name, spec in cleaned["color_masks"].items():
         polylines = _mask_to_polylines(spec["mask"])
         for pts, length in polylines:
@@ -45,7 +45,7 @@ def vectorize(cleaned, prepared, saver):
                 "length_px": length,
             })
 
-    # Если цвета не было (калька) — векторизуем края Canny как тип "edge".
+    # If there was no color (tracing paper) — vectorize the Canny edges as type "edge".
     if not cleaned["color_masks"] and cleaned["canny"] is not None:
         polylines = _mask_to_polylines(cleaned["canny"])
         for pts, length in polylines:
@@ -56,7 +56,7 @@ def vectorize(cleaned, prepared, saver):
                 "length_px": length,
             })
 
-    # Самый важный debug-кадр: вектора поверх оригинала — проверяем глазами.
+    # The most important debug frame: vectors over the original — check by eye.
     overlay = _draw_overlay(prepared["color"], features)
     saver.save("vectors_overlay", overlay)
 
@@ -65,10 +65,10 @@ def vectorize(cleaned, prepared, saver):
 
 def _mask_to_polylines(mask):
     """
-    Превратить белые пятна маски в полилинии.
-    Если доступна скелетизация — трассируем ОСЕВЫЕ линии (точка проходится один раз).
-    Иначе — фолбэк на контуры (обводка пятна, точки задваиваются).
-    Возвращает список (points, length_px), где points — список (x, y).
+    Turn the white blobs of the mask into polylines.
+    If skeletonization is available — trace the CENTERLINES (each point visited once).
+    Otherwise — fall back to contours (tracing the blob, points are doubled).
+    Returns a list of (points, length_px), where points is a list of (x, y).
     """
     if config.USE_SKELETON and _HAS_SKIMAGE:
         return _skeleton_to_polylines(mask)
@@ -76,14 +76,14 @@ def _mask_to_polylines(mask):
 
 
 def _contour_to_polylines(mask):
-    """Фолбэк: обвести белые пятна контурами и упростить (контур — замкнутая петля)."""
+    """Fallback: trace white blobs with contours and simplify (a contour is a closed loop)."""
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     result = []
     for contour in contours:
-        # Слишком короткие контуры — мусор, пропускаем.
+        # Contours that are too short are garbage, skip them.
         if len(contour) < config.MIN_CONTOUR_POINTS:
             continue
-        # Упрощаем ломаную (Douglas-Peucker): меньше точек, та же форма.
+        # Simplify the polyline (Douglas-Peucker): fewer points, the same shape.
         approx = cv2.approxPolyDP(contour, config.APPROX_EPSILON, True)
         pts = [(int(x), int(y)) for x, y in approx.reshape(-1, 2)]
         if len(pts) < 2:
@@ -93,19 +93,20 @@ def _contour_to_polylines(mask):
     return result
 
 
-# 8 соседей пикселя (для обхода скелета).
+# The 8 neighbors of a pixel (for traversing the skeleton).
 _NEIGHBORS = [(-1, -1), (-1, 0), (-1, 1), (0, -1),
               (0, 1), (1, -1), (1, 0), (1, 1)]
 
 
 def _skeleton_to_polylines(mask):
     """
-    Утончить маску до линий в 1px (скелет) и проследить каждую ветку как полилинию.
+    Thin the mask down to 1px lines (a skeleton) and trace each branch as a polyline.
 
-    Алгоритм: считаем число соседей у каждого скелетного пикселя. Точки с одним
-    соседом — концы линий, с тремя и более — развилки. Идём от каждого конца/развилки
-    вдоль соседей, пока не упрёмся в другой конец/развилку. Замкнутые петли без концов
-    обходим отдельно. Так каждая точка попадает в результат ОДИН раз (не задваивается).
+    Algorithm: count the number of neighbors of each skeleton pixel. Points with one
+    neighbor are line ends, those with three or more are junctions. We walk from each
+    end/junction along the neighbors until we hit another end/junction. Closed loops
+    without ends are traversed separately. This way each point ends up in the result
+    ONCE (not doubled).
     """
     skel = _sk_skeletonize(mask > 0)
     coords = {(int(y), int(x)) for y, x in zip(*np.where(skel))}
@@ -116,7 +117,7 @@ def _skeleton_to_polylines(mask):
     visited_edges = set()
     polylines = []
 
-    # Стартовые точки — концы (1 сосед) и развилки (>=3 соседа).
+    # Start points — ends (1 neighbor) and junctions (>=3 neighbors).
     nodes = [p for p in coords if len(neighbors[p]) != 2]
     for node in nodes:
         for nb in neighbors[node]:
@@ -126,7 +127,7 @@ def _skeleton_to_polylines(mask):
             if len(path) >= 2:
                 polylines.append(path)
 
-    # Изолированные петли (все точки имеют по 2 соседа, узлов нет).
+    # Isolated loops (all points have exactly 2 neighbors, no nodes).
     for p in coords:
         for nb in neighbors[p]:
             if (p, nb) not in visited_edges:
@@ -136,7 +137,7 @@ def _skeleton_to_polylines(mask):
 
     result = []
     for path in polylines:
-        # path — список (row, col); переводим в (x, y) = (col, row).
+        # path — a list of (row, col); convert to (x, y) = (col, row).
         pts_xy = [(c, r) for (r, c) in path]
         length = _polyline_length(pts_xy)
         if length < config.MIN_SKELETON_LENGTH:
@@ -153,7 +154,7 @@ def _skel_neighbors(p, coords):
 
 
 def _trace_branch(start, first, neighbors, visited_edges):
-    """Пройти от start через first вдоль линии, пока ветка не кончится/не развилка."""
+    """Walk from start through first along the line until the branch ends/junctions."""
     path = [start]
     prev, cur = start, first
     visited_edges.add((prev, cur))
@@ -161,9 +162,9 @@ def _trace_branch(start, first, neighbors, visited_edges):
     while True:
         path.append(cur)
         nbs = neighbors[cur]
-        # На обычной точке линии ровно 2 соседа — идём в тот, откуда не пришли.
+        # An ordinary line point has exactly 2 neighbors — go to the one we didn't come from.
         if len(nbs) != 2:
-            break  # дошли до конца или развилки
+            break  # reached an end or a junction
         nxt = nbs[0] if nbs[1] == prev else nbs[1]
         if (cur, nxt) in visited_edges:
             break
@@ -183,20 +184,20 @@ def _polyline_length(pts):
 
 
 def _simplify(pts_xy):
-    """Упростить открытую ломаную (Douglas-Peucker, closed=False — без задвоения)."""
+    """Simplify an open polyline (Douglas-Peucker, closed=False — no doubling)."""
     arr = np.array(pts_xy, dtype=np.int32).reshape(-1, 1, 2)
     approx = cv2.approxPolyDP(arr, config.APPROX_EPSILON, False)
     return [(int(x), int(y)) for x, y in approx.reshape(-1, 2)]
 
 
 def _draw_overlay(color_image, features):
-    """Нарисовать все вектора поверх копии цветного кадра (для визуальной проверки)."""
+    """Draw all vectors over a copy of the color frame (for visual inspection)."""
     overlay = color_image.copy()
-    # Цвета обводки в BGR по типу объекта.
+    # Outline colors in BGR by feature type.
     type_colors = {
-        "fault": (0, 0, 255),      # красный
-        "boundary": (0, 255, 0),   # зелёный
-        "edge": (255, 0, 0),       # синий
+        "fault": (0, 0, 255),      # red
+        "boundary": (0, 255, 0),   # green
+        "edge": (255, 0, 0),       # blue
     }
     for f in features:
         color = type_colors.get(f["type"], (0, 255, 255))

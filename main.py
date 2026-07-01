@@ -1,15 +1,15 @@
 """
-main.py — точка входа. Запускается из командной строки:
+main.py — the entry point. Run from the command line:
 
     python main.py --input input --output output --debug debug --profile geological
 
-Что делает:
-  1) находит все картинки в папке --input (включая подпапки),
-  2) для каждой запускает пайплайн (src/pipeline.py),
-  3) печатает прогресс и краткий итог.
+What it does:
+  1) finds all images in the --input folder (including subfolders),
+  2) runs the pipeline (src/pipeline.py) on each one,
+  3) prints progress and a short summary.
 
-Пути по умолчанию — относительные папки проекта, поэтому судья может просто
-склонировать репозиторий, положить сканы в input/ и запустить `python main.py`.
+The default paths are relative project folders, so the judge can simply clone the
+repository, drop the scans into input/ and run `python main.py`.
 """
 
 import argparse
@@ -20,8 +20,8 @@ from src import config, export, io_utils, pipeline
 
 def _force_utf8_output():
     """
-    Заставить консоль печатать в UTF-8, иначе на Windows русский текст превращается
-    в «кракозябры». reconfigure есть в Python 3.7+; на старых версиях просто пропускаем.
+    Force the console to print in UTF-8, otherwise on Windows non-ASCII text turns into
+    "mojibake". reconfigure exists in Python 3.7+; on older versions we simply skip it.
     """
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -32,25 +32,25 @@ def _force_utf8_output():
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Векторизация исторических геологических карт (Трек 2)."
+        description="Vectorization of historical geological maps (Track 2)."
     )
     parser.add_argument("--input", default="input",
-                        help="папка со сканами карт (по умолчанию: input)")
+                        help="folder of map scans (default: input)")
     parser.add_argument("--output", default="output",
-                        help="папка для результатов GeoJSON (по умолчанию: output)")
+                        help="folder for GeoJSON results (default: output)")
     parser.add_argument("--debug", default="debug",
-                        help="папка для промежуточных картинок (по умолчанию: debug)")
+                        help="folder for intermediate images (default: debug)")
     parser.add_argument("--profile", default=config.DEFAULT_PROFILE,
                         choices=list(config.PROFILES.keys()),
-                        help="набор цветовых порогов (по умолчанию: %(default)s)")
+                        help="set of color thresholds (default: %(default)s)")
     parser.add_argument("--aoi", default=None,
-                        help="папка или файл с Area of Interest для геопривязки "
-                             "(пиксели -> WGS84). Если не задан — координаты пиксельные")
+                        help="folder or file with the Area of Interest for georeferencing "
+                             "(pixels -> WGS84). If not given — coordinates stay in pixels")
     parser.add_argument("--no-debug", action="store_true",
-                        help="не сохранять промежуточные картинки (быстрее)")
+                        help="do not save intermediate images (faster)")
     parser.add_argument("--use-sam", action="store_true", default=config.USE_SAM,
-                        help="опц.: дополнить выделение объектов сегментами SAM "
-                             "(требует requirements-sam.txt и чекпойнт; иначе фолбэк на HSV)")
+                        help="opt.: augment feature extraction with SAM segments "
+                             "(requires requirements-sam.txt and a checkpoint; otherwise falls back to HSV)")
     return parser.parse_args()
 
 
@@ -59,7 +59,7 @@ def main():
     args = parse_args()
     debug_enabled = not args.no_debug
 
-    # Создаём папки результата заранее (если их нет).
+    # Create the result folders in advance (if they don't exist).
     io_utils.ensure_dir(args.output)
     if debug_enabled:
         io_utils.ensure_dir(args.debug)
@@ -68,16 +68,16 @@ def main():
     if not images:
         import os
         if not os.path.isdir(args.input):
-            print(f"Папка '{args.input}' не найдена. Создайте её и положите туда сканы "
-                  f"карт, либо укажите свою папку через --input.")
+            print(f"Folder '{args.input}' not found. Create it and put map scans there, "
+                  f"or specify your own folder via --input.")
         else:
-            print(f"В папке '{args.input}' не найдено картинок. Поддерживаемые форматы: "
+            print(f"No images found in folder '{args.input}'. Supported formats: "
                   f"{', '.join(config.IMAGE_EXTENSIONS)}")
         return
 
-    print(f"Найдено карт: {len(images)}. Профиль: {args.profile}. "
-          f"Debug: {'вкл' if debug_enabled else 'выкл'}. "
-          f"SAM: {'вкл' if args.use_sam else 'выкл'}")
+    print(f"Maps found: {len(images)}. Profile: {args.profile}. "
+          f"Debug: {'on' if debug_enabled else 'off'}. "
+          f"SAM: {'on' if args.use_sam else 'off'}")
     print("-" * 60)
 
     results = []
@@ -95,22 +95,22 @@ def main():
         results.append(result)
 
         status = result["status"]
-        mark = "OK " if status == "ok" else "ПРОПУСК"
+        mark = "OK " if status == "ok" else "SKIP"
         print(f"[{i:>3}/{len(images)}] {mark} {result['name']}")
 
-    # Сводный отчёт по всем картам.
+    # The consolidated report over all maps.
     summary_path = export.write_summary(results, args.output)
 
-    # Краткий итог
+    # Short summary
     ok = sum(1 for r in results if r["status"] == "ok")
     failed = len(results) - ok
     low = sum(1 for r in results if r.get("confidence") == "low")
     geo = sum(1 for r in results if r.get("georeferenced"))
     legend_total = sum(r.get("num_legend", 0) for r in results)
     print("-" * 60)
-    print(f"Готово. Успешно: {ok}, пропущено: {failed}, low_confidence: {low}, "
-          f"геопривязано (WGS84): {geo}, образцов легенды: {legend_total}.")
-    print(f"GeoJSON -> {args.output}/  |  Сводка -> {summary_path}")
+    print(f"Done. Successful: {ok}, skipped: {failed}, low_confidence: {low}, "
+          f"georeferenced (WGS84): {geo}, legend swatches: {legend_total}.")
+    print(f"GeoJSON -> {args.output}/  |  Summary -> {summary_path}")
 
 
 if __name__ == "__main__":

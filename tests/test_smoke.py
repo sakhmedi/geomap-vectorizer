@@ -1,10 +1,11 @@
 """
-test_smoke.py — быстрый end-to-end тест: гоняем пайплайн на закоммиченном примере
-и проверяем, что на выходе валидный GeoJSON и непустая сводка.
+test_smoke.py — a quick end-to-end test: run the pipeline on the committed example
+and check that the output is valid GeoJSON and a non-empty summary.
 
-Запуск:  python -m pytest
-Тест НЕ требует интернета и тяжёлых данных — только examples/example_original.jpg,
-который лежит в репозитории. Так судья (и CI) за пару секунд убеждается, что код жив.
+Run:  python -m pytest
+The test needs NO internet and no heavy data — only examples/example_original.jpg,
+which is in the repository. This way the judge (and CI) confirms in a couple of seconds
+that the code is alive.
 """
 
 import json
@@ -18,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO_ROOT / "examples" / "maps" / "example_original.jpg"
 
 
-@pytest.mark.skipif(not EXAMPLE.exists(), reason="нет examples/example_original.jpg")
+@pytest.mark.skipif(not EXAMPLE.exists(), reason="no examples/example_original.jpg")
 def test_pipeline_produces_valid_geojson(tmp_path):
     out_dir = tmp_path / "out"
     result = pipeline.process_map(
@@ -28,12 +29,12 @@ def test_pipeline_produces_valid_geojson(tmp_path):
         debug_root=str(tmp_path / "dbg"),
         profile_name=config.DEFAULT_PROFILE,
         debug_enabled=False,
-        aoi_path=None,  # без AOI: ждём пиксельный фолбэк, не падение
+        aoi_path=None,  # without an AOI: we expect the pixel fallback, not a crash
     )
 
     assert result["status"] == "ok"
-    assert result["num_features"] >= 1, "ожидаем хотя бы одну найденную линию"
-    assert result["georeferenced"] is False  # AOI не задан -> пиксели
+    assert result["num_features"] >= 1, "we expect at least one found line"
+    assert result["georeferenced"] is False  # no AOI given -> pixels
 
     geojson_path = out_dir / "example_original.geojson"
     assert geojson_path.exists()
@@ -45,7 +46,7 @@ def test_pipeline_produces_valid_geojson(tmp_path):
         assert len(feat["geometry"]["coordinates"]) >= 2
 
 
-@pytest.mark.skipif(not EXAMPLE.exists(), reason="нет examples/example_original.jpg")
+@pytest.mark.skipif(not EXAMPLE.exists(), reason="no examples/example_original.jpg")
 def test_summary_written(tmp_path):
     out_dir = tmp_path / "out"
     result = pipeline.process_map(
@@ -60,17 +61,17 @@ def test_summary_written(tmp_path):
     assert Path(summary).exists()
     text = Path(summary).read_text(encoding="utf-8")
     assert "example_original" in text
-    assert "georeferenced" in text  # заголовок новой колонки на месте
+    assert "georeferenced" in text  # the new column header is in place
 
 
 def test_missing_input_dir_is_graceful():
-    # Несуществующая папка -> пустой список, а НЕ исключение.
+    # A non-existent folder -> an empty list, NOT an exception.
     assert io_utils.find_images("__no_such_dir__") == []
 
 
-@pytest.mark.skipif(not EXAMPLE.exists(), reason="нет examples/example_original.jpg")
+@pytest.mark.skipif(not EXAMPLE.exists(), reason="no examples/example_original.jpg")
 def test_legend_extraction_runs_and_links_features():
-    # Извлечение легенды не должно падать и должно возвращать согласованные структуры.
+    # Legend extraction must not crash and must return consistent structures.
     from src import io_utils as iou
     from src import legend, preprocess, extract, cleanup, vectorize
 
@@ -86,44 +87,44 @@ def test_legend_extraction_runs_and_links_features():
 
     assert isinstance(entries, list)
     assert isinstance(summary, list)
-    # Каждый образец описан полным набором полей.
+    # Each swatch is described by a full set of fields.
     for e in entries:
         assert set(e) >= {"color", "type", "bbox_px", "mean_hsv", "area_px"}
-    # Сводка ссылается только на цвета, у которых реально нашлись образцы.
+    # The summary references only colors that actually had swatches found.
     for s in summary:
         assert s["num_swatches"] >= 1
 
 
 def test_sam_unavailable_is_graceful():
-    # Без torch/чекпойнта SAM недоступен, но это не ошибка — просто False.
+    # Without torch/a checkpoint SAM is unavailable, but that is not an error — just False.
     from src import sam_extract
     assert isinstance(sam_extract.available(), bool)
 
 
 def test_legend_detects_swatches_not_lines():
     """
-    Детерминированная проверка на синтетике: рисуем плотные цветные квадраты
-    (образцы легенды) и тонкую красную линию (разлом). Извлечение должно поймать
-    квадраты как образцы и НЕ принять линию за образец.
+    A deterministic check on synthetic data: draw dense colored squares
+    (legend swatches) and a thin red line (a fault). Extraction must catch the
+    squares as swatches and NOT mistake the line for a swatch.
     """
     import cv2
     import numpy as np
     from src import io_utils as iou
     from src import legend
 
-    # Светлый «бумажный» фон.
+    # A light "paper" background.
     img = np.full((400, 400, 3), 235, dtype=np.uint8)
-    # Плотные образцы (BGR): красный, зелёный, синий квадраты ~20x20.
-    cv2.rectangle(img, (30, 30), (52, 52), (40, 40, 200), -1)    # красный
-    cv2.rectangle(img, (30, 70), (52, 92), (40, 170, 40), -1)    # зелёный
-    cv2.rectangle(img, (30, 110), (52, 132), (200, 60, 40), -1)  # синий
-    # Тонкая красная линия — это НЕ образец легенды (низкая плотность заливки).
+    # Dense swatches (BGR): red, green, blue squares ~20x20.
+    cv2.rectangle(img, (30, 30), (52, 52), (40, 40, 200), -1)    # red
+    cv2.rectangle(img, (30, 70), (52, 92), (40, 170, 40), -1)    # green
+    cv2.rectangle(img, (30, 110), (52, 132), (200, 60, 40), -1)  # blue
+    # A thin red line — this is NOT a legend swatch (low fill density).
     cv2.line(img, (120, 200), (360, 230), (40, 40, 200), 2)
 
     saver = iou.DebugSaver("dbg", "syn", enabled=False)
     entries, summary = legend.extract_legend(img, "geological", features=[], saver=saver)
 
     colors = {e["color"] for e in entries}
-    assert {"red", "green", "blue"} <= colors, f"ожидали 3 образца, нашли {colors}"
-    # Тонкая линия не должна добавить лишних «красных образцов» (только квадрат).
+    assert {"red", "green", "blue"} <= colors, f"expected 3 swatches, found {colors}"
+    # The thin line must not add extra "red swatches" (only the square).
     assert sum(1 for e in entries if e["color"] == "red") == 1

@@ -1,22 +1,22 @@
-# Зависимости проекта. Все ставятся колёсами (wheels) из коробки — без GDAL/компиляции,
-# чтобы судья поднял окружение с первого `pip install -r requirements.txt`.
+# Project dependencies. All install as wheels out of the box — no GDAL/compilation,
+# so the judge can bring up the environment with the first `pip install -r requirements.txt`.
 
-# Версии закреплены по мажору (на чём проверено), чтобы у судьи на свежем окружении
-# не подтянулся ломающий релиз. Диапазоны, а не точные пины — чтобы колесо нашлось
-# под разные версии Python (проверено на 3.9–3.14).
+# Versions are pinned by major (what it was tested on), so that on a fresh environment
+# the judge does not pull in a breaking release. Ranges, not exact pins — so a wheel is
+# found for different Python versions (tested on 3.9–3.14).
 
-# --- Ядро (компьютерное зрение) ---
-opencv-python>=4.8,<5      # чтение картинок, HSV, морфология, контуры
-numpy>=1.24,<3             # массивы/матрицы — на них опирается OpenCV
+# --- Core (computer vision) ---
+opencv-python>=4.8,<5      # reading images, HSV, morphology, contours
+numpy>=1.24,<3             # arrays/matrices — OpenCV relies on them
 
-# --- Геопривязка (Трек 2: пиксели -> WGS84) ---
-pyproj>=3.5,<4             # трансформация датума Пулково 1942 (EPSG:4284) -> WGS84 (EPSG:4326)
+# --- Georeferencing (Track 2: pixels -> WGS84) ---
+pyproj>=3.5,<4             # datum transformation Pulkovo 1942 (EPSG:4284) -> WGS84 (EPSG:4326)
 
-# --- Векторизация (осевые линии вместо контуров-петель) ---
-scikit-image>=0.21,<1.0    # скелетизация маски в линию 1px; при отсутствии — фолбэк на контуры
+# --- Vectorization (centerlines instead of contour loops) ---
+scikit-image>=0.21,<1.0    # skeletonizing the mask into a 1px line; if absent — fallback to contours
 
-# --- Опционально: экспорт Shapefile (бонус-формат к GeoJSON) ---
-pyshp>=2.3,<3              # запись .shp/.dbf/.shx; если не установлен — пишется только GeoJSON
+# --- Optional: Shapefile export (a bonus format alongside GeoJSON) ---
+pyshp>=2.3,<3              # writing .shp/.dbf/.shx; if not installed — only GeoJSON is written
 
-# --- Тесты ---
-pytest>=7.0               # быстрый smoke-тест (python -m pytest)
+# --- Tests ---
+pytest>=7.0               # a quick smoke test (python -m pytest)

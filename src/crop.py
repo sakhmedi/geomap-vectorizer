@@ -1,13 +1,13 @@
 """
-crop.py — необязательный этап: обрезка до области карты (по рамке neat-line).
+crop.py — an optional stage: cropping to the map area (by the neat-line frame).
 
-Зачем: на сканах вокруг карты есть поля и легенда с цветными образцами.
-Образцы в легенде дают ложные срабатывания (красный/зелёный «значок» становится вектором).
-Если найти прямоугольную рамку карты и обрезать до неё — поля и легенда уходят.
+Why: on scans there are margins and a legend with color swatches around the map.
+The swatches in the legend cause false positives (a red/green "icon" becomes a vector).
+If we find the rectangular map frame and crop to it — the margins and legend go away.
 
-ВАЖНО — безопасный откат: рамку находим не всегда (выцветшие/без рамки карты).
-Если уверенного прямоугольника нет, НИЧЕГО не режем и возвращаем кадр как есть.
-Лучше не обрезать, чем случайно отрезать кусок карты.
+IMPORTANT — safe fallback: the frame is not always found (faded/frameless maps).
+If there is no confident rectangle, we crop NOTHING and return the frame as is.
+Better not to crop than to accidentally cut off a piece of the map.
 """
 
 import cv2
@@ -17,18 +17,18 @@ from src import config
 
 def crop_to_map(image, saver):
     """
-    Попробовать обрезать image до рамки карты.
-    Возвращает (cropped_image, (x0, y0), cropped_flag):
-      - cropped_image — обрезанный или исходный кадр,
-      - (x0, y0) — смещение левого верхнего угла обрезки (0,0 если не резали),
-      - cropped_flag — True, если реально обрезали.
+    Try to crop image to the map frame.
+    Returns (cropped_image, (x0, y0), cropped_flag):
+      - cropped_image — the cropped or the original frame,
+      - (x0, y0) — the offset of the top-left corner of the crop (0,0 if not cropped),
+      - cropped_flag — True if we actually cropped.
     """
     if not config.CROP_TO_MAP_BORDER:
         return image, (0, 0), False
 
     rect = _find_map_rectangle(image)
     if rect is None:
-        # Рамка не найдена — безопасно не трогаем.
+        # Frame not found — safely leave it alone.
         return image, (0, 0), False
 
     x, y, w, h = rect
@@ -39,12 +39,12 @@ def crop_to_map(image, saver):
 
 def find_map_corners(image):
     """
-    Найти 4 угла прямоугольной рамки карты (как массив точек Nx2 в пикселях),
-    или None, если уверенного четырёхугольника нет.
+    Find the 4 corners of the rectangular map frame (as an Nx2 array of points in pixels),
+    or None if there is no confident quadrilateral.
 
-    Это публичная функция: её использует georef.py для построения GCP, независимо
-    от того, включена ли обрезка (CROP_TO_MAP_BORDER). Сама обрезка — отдельное
-    решение, а углы рамки полезны для геопривязки в любом случае.
+    This is a public function: georef.py uses it to build GCPs, regardless of whether
+    cropping is enabled (CROP_TO_MAP_BORDER). Cropping itself is a separate decision,
+    and the frame corners are useful for georeferencing in any case.
     """
     h_img, w_img = image.shape[:2]
     img_area = h_img * w_img
@@ -52,7 +52,7 @@ def find_map_corners(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blur, 50, 150)
-    # Утолщаем края, чтобы разорванная рамка соединилась в замкнутый контур.
+    # Thicken the edges so a broken frame joins into a closed contour.
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     edges = cv2.dilate(edges, kernel, iterations=2)
 
@@ -62,14 +62,15 @@ def find_map_corners(image):
     best_score = 0.0
     for c in contours:
         area = cv2.contourArea(c)
-        # Рамка должна занимать заметную, но не всю площадь кадра.
+        # The frame must occupy a noticeable, but not the entire, area of the image.
         if area < config.CROP_MIN_AREA_FRAC * img_area:
             continue
         if area > config.CROP_MAX_AREA_FRAC * img_area:
             continue
         peri = cv2.arcLength(c, True)
-        # Мятые исторические карты редко дают чистый 4-угольник с одним epsilon —
-        # пробуем несколько уровней упрощения и берём первый сходящийся в выпуклый квад.
+        # Creased historical maps rarely give a clean quad with a single epsilon —
+        # we try several simplification levels and take the first one that converges
+        # to a convex quad.
         approx = None
         for eps in (0.02, 0.03, 0.05, 0.08):
             cand = cv2.approxPolyDP(c, eps * peri, True)
@@ -78,11 +79,11 @@ def find_map_corners(image):
                 break
         if approx is None:
             continue
-        # Среди кандидатов предпочитаем самый «прямоугольный»: площадь контура,
-        # делённая на площадь его bounding box, у настоящей рамки близка к 1.
+        # Among the candidates we prefer the most "rectangular" one: the contour area
+        # divided by the area of its bounding box is close to 1 for a real frame.
         x, y, w, h = cv2.boundingRect(approx)
         rectangularity = area / float(w * h) if w * h else 0.0
-        score = rectangularity * area  # прямоугольный И крупный
+        score = rectangularity * area  # rectangular AND large
         if score > best_score:
             best_score = score
             best_quad = approx.reshape(4, 2)
@@ -92,8 +93,8 @@ def find_map_corners(image):
 
 def _find_map_rectangle(image):
     """
-    Найти крупный ~прямоугольный контур (рамку карты).
-    Возвращает (x, y, w, h) bounding box или None, если уверенной рамки нет.
+    Find a large ~rectangular contour (the map frame).
+    Returns the (x, y, w, h) bounding box or None if there is no confident frame.
     """
     quad = find_map_corners(image)
     if quad is None:

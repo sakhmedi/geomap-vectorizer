@@ -1,15 +1,15 @@
 """
-export.py — этап 6: запись результатов на диск.
+export.py — stage 6: writing the results to disk.
 
-Что пишем:
-  1) GeoJSON на каждую карту — найденные линии как FeatureCollection (LineString).
-  2) (опционально) Shapefile — те же линии, если установлен пакет pyshp.
-  3) Сводка _summary.csv по всем картам — честный отчёт (что получилось, что low/без привязки).
+What we write:
+  1) A GeoJSON per map — the found lines as a FeatureCollection (LineString).
+  2) (optionally) A Shapefile — the same lines, if the pyshp package is installed.
+  3) A _summary.csv over all maps — an honest report (what worked, what is low/not referenced).
 
-Координаты:
-  - Если карта геопривязана (есть GeoTransform) — координаты в WGS84 [lon, lat], crs=EPSG:4326.
-  - Если привязки нет (рамка/AOI не найдены) — честно отдаём ПИКСЕЛИ (x вправо, y вниз),
-    crs='pixel-coordinates', georeferenced=false. Лучше пиксели, чем привязка наугад.
+Coordinates:
+  - If the map is georeferenced (there is a GeoTransform) — coordinates in WGS84 [lon, lat], crs=EPSG:4326.
+  - If there is no referencing (frame/AOI not found) — we honestly hand over PIXELS (x right, y down),
+    crs='pixel-coordinates', georeferenced=false. Better pixels than referencing at random.
 """
 
 import csv
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from src import config, io_utils
 
-# pyshp — опционально. Если нет, Shapefile просто не пишем (GeoJSON судьям достаточно).
+# pyshp — optional. If absent, we simply don't write the Shapefile (GeoJSON is enough for the judges).
 try:
     import shapefile  # pyshp
     _HAS_PYSHP = True
@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover
 
 
 def _feature_coordinates(feature, geo_transform):
-    """Вернуть координаты линии: WGS84 [lon, lat], если есть привязка, иначе пиксели."""
+    """Return the line's coordinates: WGS84 [lon, lat] if referenced, otherwise pixels."""
     pts = feature["points"]
     if geo_transform is not None:
         lonlat = geo_transform.to_wgs84(pts)
@@ -38,7 +38,7 @@ def _feature_coordinates(feature, geo_transform):
 def features_to_geojson(features, map_name, width, height,
                         crop_offset=(0, 0), cropped=False,
                         geo_transform=None, geo_info=None, legend_summary=None):
-    """Собрать GeoJSON FeatureCollection из списка фич векторизации."""
+    """Assemble a GeoJSON FeatureCollection from the list of vectorization features."""
     georeferenced = geo_transform is not None
     geo_info = geo_info or {}
 
@@ -98,10 +98,10 @@ def features_to_geojson(features, map_name, width, height,
 
 
 def write_geojson(geojson, output_dir, map_name):
-    """Записать GeoJSON в output/<map_name>.geojson. Возвращает путь."""
+    """Write the GeoJSON to output/<map_name>.geojson. Returns the path."""
     io_utils.ensure_dir(output_dir)
     out_path = Path(output_dir) / f"{map_name}.geojson"
-    # ensure_ascii=False — чтобы кириллица в именах писалась нормально, не \uXXXX.
+    # ensure_ascii=False — so Cyrillic in names is written normally, not as \uXXXX.
     text = json.dumps(geojson, ensure_ascii=False, indent=2)
     out_path.write_text(text, encoding="utf-8")
     return out_path
@@ -109,9 +109,9 @@ def write_geojson(geojson, output_dir, map_name):
 
 def write_legend(entries, summary, output_dir, map_name):
     """
-    Записать легенду карты в output/<map_name>.legend.json (если есть образцы).
-    Возвращает путь или None. Это отдельный сайдкар, чтобы не раздувать GeoJSON
-    геометрии; сводка по цветам дополнительно лежит и в metadata.legend.
+    Write the map legend to output/<map_name>.legend.json (if there are swatches).
+    Returns the path or None. This is a separate sidecar so as not to bloat the geometry
+    GeoJSON; the per-color summary additionally lives in metadata.legend as well.
     """
     if not entries:
         return None
@@ -119,8 +119,8 @@ def write_legend(entries, summary, output_dir, map_name):
     out_path = Path(output_dir) / f"{map_name}.legend.json"
     payload = {
         "source_map": map_name,
-        "note": ("Цветные образцы легенды (HSV) и связь с векторами того же класса. "
-                 "Без OCR подписей (кириллица) — это задача Трека 1."),
+        "note": ("Colored legend swatches (HSV) and links to vectors of the same class. "
+                 "Without OCR of the labels (Cyrillic) — that is a Track 1 task."),
         "summary": summary,
         "swatches": entries,
     }
@@ -131,8 +131,8 @@ def write_legend(entries, summary, output_dir, map_name):
 
 def write_shapefile(geojson, output_dir, map_name):
     """
-    (Опционально) Записать Shapefile из того же GeoJSON. Возвращает путь или None,
-    если pyshp не установлен или фич нет. Тихо пропускаем — это бонус-формат.
+    (Optionally) Write a Shapefile from the same GeoJSON. Returns the path or None
+    if pyshp is not installed or there are no features. We skip silently — it is a bonus format.
     """
     if not _HAS_PYSHP:
         return None
@@ -156,13 +156,13 @@ def write_shapefile(geojson, output_dir, map_name):
                       props["color"], props["length_px"])
     writer.close()
 
-    # .prj с WKT нужного CRS, чтобы GIS правильно показал слой.
+    # A .prj with the WKT of the right CRS, so GIS shows the layer correctly.
     _write_prj(out_base, geojson["metadata"].get("georeferenced", False))
     return Path(out_base + ".shp")
 
 
 def _write_prj(out_base, georeferenced):
-    """Записать .prj (WKT). Для привязанных карт — WGS84; иначе пропускаем."""
+    """Write the .prj (WKT). For referenced maps — WGS84; otherwise skip."""
     if not georeferenced:
         return
     try:
@@ -175,8 +175,8 @@ def _write_prj(out_base, georeferenced):
 
 def write_summary(results, output_dir):
     """
-    Записать сводный отчёт output/_summary.csv по всем картам.
-    results — список словарей-отчётов от pipeline.process_map.
+    Write the consolidated report output/_summary.csv over all maps.
+    results — a list of report dicts from pipeline.process_map.
     """
     io_utils.ensure_dir(output_dir)
     out_path = Path(output_dir) / "_summary.csv"

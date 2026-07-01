@@ -1,12 +1,12 @@
 """
-pipeline.py — обработка ОДНОЙ карты от начала до конца.
+pipeline.py — processing ONE map from start to finish.
 
-Этапы: загрузка -> предобработка -> выделение объектов (HSV/тёмные линии/Canny) ->
-очистка масок -> векторизация (осевые линии) -> геопривязка (пиксели -> WGS84) ->
-экспорт (GeoJSON + Shapefile). Каждый этап сохраняет свой debug-кадр.
+Stages: load -> preprocess -> feature extraction (HSV/dark lines/Canny) ->
+mask cleanup -> vectorization (centerlines) -> georeferencing (pixels -> WGS84) ->
+export (GeoJSON + Shapefile). Each stage saves its own debug frame.
 
-Функция возвращает небольшой словарь-отчёт по карте (для сводки _summary.csv).
-Принцип: одна плохая карта не роняет весь прогон — помечаем status/confidence/georeferenced.
+The function returns a small report dict for the map (for the _summary.csv summary).
+Principle: one bad map does not bring down the whole run — we flag status/confidence/georeferenced.
 """
 
 import cv2
@@ -18,54 +18,54 @@ from src import (cleanup, config, export, extract, georef, io_utils, legend,
 def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
                 debug_enabled=True, aoi_path=None, use_sam=False):
     """
-    Прогнать одну карту через пайплайн. Возвращает dict с результатом:
+    Run one map through the pipeline. Returns a dict with the result:
       {name, status, ...}
     status:
-      - "failed"  : файл не прочитался (битый/не картинка)
-      - "ok"      : карта прошла весь конвейер (вектора + экспорт); качество
-                    отражают поля confidence/georeferenced, а не status
+      - "failed"  : the file could not be read (corrupt/not an image)
+      - "ok"      : the map passed the whole pipeline (vectors + export); quality is
+                    reflected by the confidence/georeferenced fields, not by status
     """
     map_name = io_utils.get_map_name(image_path, input_dir)
 
-    # --- Этап 1: загрузка ---
+    # --- Stage 1: load ---
     image = io_utils.load_image(image_path)
     if image is None:
-        # Не падаем на одной плохой карте — помечаем и идём дальше.
-        return {"name": map_name, "status": "failed", "reason": "не удалось прочитать файл"}
+        # Don't crash on one bad map — flag it and move on.
+        return {"name": map_name, "status": "failed", "reason": "could not read the file"}
 
     saver = io_utils.DebugSaver(debug_root, map_name, enabled=debug_enabled)
     saver.save("original", image)
 
     height, width = image.shape[:2]
 
-    # --- Этап 2: предобработка ---
+    # --- Stage 2: preprocessing ---
     prepared = preprocess.preprocess(image, saver)
-    # prepared["color"] -> для HSV, prepared["gray"] -> для краёв.
+    # prepared["color"] -> for HSV, prepared["gray"] -> for edges.
 
-    # --- Этап 3: выделение объектов (HSV + Canny, опц. SAM) ---
+    # --- Stage 3: feature extraction (HSV + Canny, opt. SAM) ---
     extracted = extract.extract(prepared, profile_name, saver, use_sam=use_sam)
     # extracted["color_masks"], extracted["canny"], extracted["combined"]
 
-    # --- Этап 4: очистка масок (морфология + фильтр мелочи) ---
+    # --- Stage 4: mask cleanup (morphology + small-blob filter) ---
     cleaned = cleanup.cleanup(extracted, saver)
     # cleaned["color_masks"], cleaned["combined"], cleaned["canny"]
 
-    # --- Этап 5: векторизация (контуры -> полилинии) ---
+    # --- Stage 5: vectorization (contours -> polylines) ---
     features = vectorize.vectorize(cleaned, prepared, saver)
 
-    # --- Этап 5a: извлечение легенды (образцы цвета -> класс слоя) ---
+    # --- Stage 5a: legend extraction (color swatches -> layer class) ---
     legend_entries, legend_summary = legend.extract_legend(
         prepared["color"], profile_name, features=features, saver=saver)
 
-    # --- Триаж: насколько уверены в результате ---
+    # --- Triage: how confident we are in the result ---
     confidence, reason = _assess_confidence(cleaned["combined"], features)
 
-    # --- Этап 5b: геопривязка (пиксели -> WGS84), если задан AOI ---
-    # Привязку строим в той же системе пикселей, что и вектора (prepared["color"]).
+    # --- Stage 5b: georeferencing (pixels -> WGS84), if an AOI is given ---
+    # We build the referencing in the same pixel space as the vectors (prepared["color"]).
     geo_transform, geo_info = georef.georeference(prepared["color"], map_name, aoi_path)
 
-    # --- Этап 6: экспорт в GeoJSON (+ опц. Shapefile) ---
-    # prepared["color"] мог быть ужат — берём его размер, чтобы координаты совпадали с векторами.
+    # --- Stage 6: export to GeoJSON (+ opt. Shapefile) ---
+    # prepared["color"] may have been shrunk — take its size so coordinates match the vectors.
     out_h, out_w = prepared["color"].shape[:2]
     geojson = export.features_to_geojson(
         features, map_name, out_w, out_h,
@@ -79,10 +79,10 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
     export.write_shapefile(geojson, output_dir, map_name)
     export.write_legend(legend_entries, legend_summary, output_dir, map_name)
 
-    # Причина в сводке: сначала про привязку (если её нет), иначе — про уверенность.
+    # The summary reason: first about referencing (if there is none), otherwise about confidence.
     summary_reason = reason
     if not geo_info.get("georeferenced") and geo_info.get("reason"):
-        summary_reason = reason or f"без привязки: {geo_info['reason']}"
+        summary_reason = reason or f"not georeferenced: {geo_info['reason']}"
 
     return {
         "name": map_name,
@@ -101,9 +101,10 @@ def process_map(image_path, input_dir, output_dir, debug_root, profile_name,
 
 def _assess_confidence(combined_mask, features):
     """
-    Простая эвристика уверенности по доле «найденных» пикселей, числу объектов и тому,
-    не жмутся ли объекты к краю кадра (признак пятен/рамки, а не геологии).
-    Возвращает (confidence, reason): confidence — 'ok' или 'low'.
+    A simple confidence heuristic based on the fraction of "found" pixels, the number of
+    features, and whether the features huddle near the image edge (a sign of stains/frame,
+    not geology).
+    Returns (confidence, reason): confidence is 'ok' or 'low'.
     """
     h, w = combined_mask.shape[:2]
     total = h * w
@@ -111,18 +112,18 @@ def _assess_confidence(combined_mask, features):
     num_features = len(features)
 
     if num_features == 0:
-        return "low", "объектов не найдено (вероятно калька/серый чертёж)"
+        return "low", "no features found (probably tracing paper/a gray drawing)"
     if coverage < config.LOW_CONFIDENCE_COVERAGE:
-        return "low", "очень мало цветных пикселей (вероятно слабый/выцветший скан)"
+        return "low", "very few colored pixels (probably a weak/faded scan)"
 
     edge_frac = _edge_feature_fraction(features, w, h)
     if edge_frac >= config.EDGE_NOISE_FRAC:
-        return "low", "много объектов у края (вероятно пятна старения/рамка, не геология)"
+        return "low", "many features near the edge (probably aging stains/frame, not geology)"
     return "ok", ""
 
 
 def _edge_feature_fraction(features, w, h):
-    """Доля объектов, чей центр лежит в краевой полосе кадра (EDGE_BAND_FRAC по сторонам)."""
+    """The fraction of features whose center lies in the image edge band (EDGE_BAND_FRAC per side)."""
     if not features:
         return 0.0
     band_x = config.EDGE_BAND_FRAC * w

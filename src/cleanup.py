@@ -1,15 +1,15 @@
 """
-cleanup.py — этап 4: очистка бинарных масок.
+cleanup.py — stage 4: cleaning up the binary masks.
 
-После HSV маска «грязная»: одиночные крапинки от бумаги, обрывки букв,
-разорванные линии. Здесь мы её причёсываем тремя приёмами:
+After HSV the mask is "dirty": single specks from the paper, fragments of letters,
+broken lines. Here we tidy it up with three techniques:
 
-  1) OPEN  (эрозия+дилатация) — убирает одиночные белые точки-шум.
-  2) CLOSE (дилатация+эрозия) — заполняет мелкие дырки и соединяет разрывы линии.
-  3) Фильтр по площади — выкидывает «кляксы» меньше N пикселей (буквы, крапинки),
-     оставляя крупные вытянутые объекты (линии разломов).
+  1) OPEN  (erosion+dilation) — removes single white noise dots.
+  2) CLOSE (dilation+erosion) — fills small holes and joins line gaps.
+  3) Area filter — discards "blobs" smaller than N pixels (letters, specks),
+     keeping large elongated objects (fault lines).
 
-На выходе — те же маски, но чистые. Каждая сохраняется в debug.
+On output — the same masks, but clean. Each is saved to debug.
 """
 
 import cv2
@@ -20,8 +20,8 @@ from src import config
 
 def cleanup(extracted, saver):
     """
-    extracted — словарь из extract: {"color_masks", "canny", "combined"}.
-    Возвращает структуру с очищенными масками:
+    extracted — the dict from extract: {"color_masks", "canny", "combined"}.
+    Returns a structure with cleaned masks:
       {"color_masks": {name: {"mask": clean, "type": ...}}, "combined": clean, "canny": clean|None}
     """
     kernel = cv2.getStructuringElement(
@@ -32,33 +32,33 @@ def cleanup(extracted, saver):
     clean_color_masks = {}
     combined = None
 
-    # Чистим каждую цветную маску по отдельности.
+    # Clean each color mask separately.
     for color_name, spec in extracted["color_masks"].items():
-        # Для разломов (линий) включаем «мост», чтобы сшить разорванные штрихи.
+        # For faults (lines) we enable the "bridge" to stitch broken strokes.
         is_fault = spec["type"].startswith("fault")
-        # Тёмные линии (fault_uncertain) шумные: дополнительно оставляем только
-        # длинные тонкие компоненты, выкидывая буквы/штриховку/заливки.
+        # Dark lines (fault_uncertain) are noisy: additionally keep only the
+        # long thin components, discarding letters/hatching/fills.
         line_only = spec["type"] == "fault_uncertain"
         clean = _clean_mask(spec["mask"], kernel, bridge=is_fault, line_only=line_only)
         clean_color_masks[color_name] = {"mask": clean, "type": spec["type"]}
         saver.save(f"clean_{color_name}", clean)
 
-        # Собираем общую чистую маску заново из очищенных кусков.
+        # Rebuild the shared clean mask from the cleaned pieces.
         if combined is None:
             combined = clean.copy()
         else:
             combined = cv2.bitwise_or(combined, clean)
 
-    # Если цветных масок не было (профиль pencil) — берём края Canny как основу.
+    # If there were no color masks (the pencil profile) — take Canny edges as the base.
     clean_canny = None
     if extracted["canny"] is not None:
-        # У краёв не выкидываем мелкое так агрессивно — только соединяем разрывы.
+        # For edges we don't discard small stuff so aggressively — only close the gaps.
         clean_canny = cv2.morphologyEx(extracted["canny"], cv2.MORPH_CLOSE, kernel,
                                        iterations=config.MORPH_CLOSE_ITERATIONS)
         saver.save("clean_canny", clean_canny)
 
     if combined is None:
-        # Нет цвета вообще — общей маской становится очищенный Canny (или пусто).
+        # No color at all — the shared mask becomes the cleaned Canny (or empty).
         h, w = extracted["combined"].shape[:2]
         combined = clean_canny if clean_canny is not None else np.zeros((h, w), dtype=np.uint8)
 
@@ -69,14 +69,15 @@ def cleanup(extracted, saver):
 
 def _clean_mask(mask, kernel, bridge=False, line_only=False):
     """
-    Применить OPEN -> CLOSE -> (опц. МОСТ) -> фильтр мелких компонентов к одной маске.
-    bridge=True добавляет ещё один CLOSE с бОльшим ядром, чтобы сшить разорванные линии.
-    line_only=True дополнительно оставляет только длинные тонкие компоненты (для
-    тёмных линий: отсекает буквы, штриховку рельефа и заливки).
+    Apply OPEN -> CLOSE -> (opt. BRIDGE) -> small-component filter to one mask.
+    bridge=True adds one more CLOSE with a larger kernel, to stitch broken lines.
+    line_only=True additionally keeps only long thin components (for dark lines:
+    cuts off letters, relief hatching and fills).
     """
-    # Гард от краевых пятен — РАНО, до морфологии: пока пятно старения ещё одно
-    # связное пятно, касающееся края, оно убирается целиком. Если ждать до фильтра
-    # площадей, OPEN раздробит пятно на куски, и часть «отлипнет» от края, уцелев.
+    # Edge-stain guard — EARLY, before morphology: while the aging stain is still one
+    # connected blob touching the edge, it is removed whole. If we wait until the area
+    # filter, OPEN will fragment the stain into pieces, and some will "detach" from the
+    # edge and survive.
     if config.DROP_BORDER_TOUCHING:
         mask = _drop_border_components(mask)
 
@@ -99,19 +100,19 @@ def _clean_mask(mask, kernel, bridge=False, line_only=False):
 
 
 def _border_tolerance(mask):
-    """Сколько пикселей от края считаем «касанием» (доля от длинной стороны)."""
+    """How many pixels from the edge count as a "touch" (fraction of the long side)."""
     h, w = mask.shape[:2]
     return max(1, int(round(config.BORDER_TOUCH_TOLERANCE_FRAC * max(h, w))))
 
 
 def _apply_label_keep(labels, keep):
-    """Собрать маску из меток, которые надо оставить (векторно, без цикла по пикселям)."""
-    keep[0] = False  # метка 0 — фон, никогда не оставляем
+    """Build a mask from the labels to keep (vectorized, without a per-pixel loop)."""
+    keep[0] = False  # label 0 is the background, never keep it
     return np.where(keep[labels], 255, 0).astype(np.uint8)
 
 
 def _border_touch_flags(stats, w_img, h_img, tol):
-    """Булев вектор по меткам: True там, где bbox компоненты касается края кадра."""
+    """A boolean vector over labels: True where the component bbox touches the image edge."""
     x = stats[:, cv2.CC_STAT_LEFT]
     y = stats[:, cv2.CC_STAT_TOP]
     w = stats[:, cv2.CC_STAT_WIDTH]
@@ -122,9 +123,9 @@ def _border_touch_flags(stats, w_img, h_img, tol):
 
 def _drop_border_components(mask):
     """
-    Убрать ВСЕ связные компоненты, касающиеся края кадра (независимо от размера).
-    Применяется к «сырой» маске: цельное краевое пятно/рамка/поля уходят одним куском,
-    а внутренние объекты (разломы, границы) остаются нетронутыми.
+    Remove ALL connected components touching the image edge (regardless of size).
+    Applied to the "raw" mask: a whole edge stain/frame/margins go away in one piece,
+    while the inner objects (faults, boundaries) stay untouched.
     """
     h_img, w_img = mask.shape[:2]
     tol = _border_tolerance(mask)
@@ -135,9 +136,9 @@ def _drop_border_components(mask):
 
 def _keep_line_like(mask):
     """
-    Оставить только ДЛИННЫЕ и ТОНКИЕ связные компоненты (линии), выкинув короткие
-    кляксы и толстые пятна. Критерий: длинная сторона bbox >= DARK_MIN_LENGTH И
-    средняя толщина (площадь / длинная сторона) <= DARK_MAX_THICKNESS.
+    Keep only the LONG and THIN connected components (lines), discarding short blobs
+    and thick patches. Criterion: the long side of the bbox >= DARK_MIN_LENGTH AND
+    the mean thickness (area / long side) <= DARK_MAX_THICKNESS.
     """
     h_img, w_img = mask.shape[:2]
     tol = _border_tolerance(mask)
@@ -156,8 +157,8 @@ def _keep_line_like(mask):
 
 def _remove_small_components(mask, min_area):
     """
-    Убрать связные белые области площадью меньше min_area пикселей (крапинки, буквы),
-    а также краевые компоненты (пятна старения/рамка). Длинные линии внутри остаются.
+    Remove connected white regions smaller than min_area pixels (specks, letters),
+    as well as edge components (aging stains/frame). Long lines inside stay.
     """
     h_img, w_img = mask.shape[:2]
     tol = _border_tolerance(mask)

@@ -1,10 +1,10 @@
 <div align="center">
 
-# TerraSoviet · Векторизация и геопривязка геологических карт
+# TerraSoviet · Vectorization and georeferencing of geological maps
 
-**Автоматический конвейер, который оживляет отсканированные советские геологические карты
-1970-х: извлекает разломы и геологические границы, превращает их в векторы и привязывает
-к реальным координатам WGS84, без обучения нейросетей, на классическом компьютерном зрении.**
+**An automated pipeline that brings scanned 1970s Soviet geological maps back to life:
+it extracts faults and geological boundaries, turns them into vectors, and ties them
+to real-world WGS84 coordinates — no neural-network training, just classic computer vision.**
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-classic%20CV-5C3EE8?logo=opencv&logoColor=white)
@@ -12,379 +12,381 @@
 ![Output](https://img.shields.io/badge/output-GeoJSON%20%2B%20Shapefile-F9A825)
 ![Tests](https://img.shields.io/badge/tests-pytest%20passing-success)
 
-<sub>Хакатон **«TerraSoviet Data Rescue»** · Трек 2 · «Векторизация и привязка карт»</sub>
+<sub>Hackathon **"TerraSoviet Data Rescue"** · Track 2 · "Map vectorization and referencing"</sub>
 
 </div>
 
 ---
 
-## Содержание
+## Contents
 
-- [О проекте](#о-проекте)
-- [Возможности](#возможности)
-- [Как это работает](#как-это-работает)
-- [Быстрый старт](#быстрый-старт)
-- [Пример результата](#пример-результата)
-- [Использование](#использование)
-- [Что получается на выходе](#что-получается-на-выходе)
-- [Геопривязка: Пулково 1942 в WGS84](#геопривязка-пулково-1942-в-wgs84)
-- [Результаты на реальном датасете](#результаты-на-реальном-датасете)
-- [Структура проекта](#структура-проекта)
-- [Тесты](#тесты)
-- [Ограничения](#ограничения)
-- [Дальнейшее развитие](#дальнейшее-развитие)
-
----
-
-## О проекте
-
-Десятилетиями ценные геологические данные советской эпохи лежат «замороженными» в
-отсканированных картах: выцветшая бумага, складки, карандашные пометки, координаты в
-устаревшем датуме. Эти карты нельзя ни искать, ни анализировать, ни накладывать на
-современные ГИС.
-
-**Этот проект автоматизирует их оцифровку.** На вход подаётся папка со сканами, на выходе
-получаются машиночитаемые **векторы (GeoJSON + Shapefile)**, привязанные к **WGS84**. Всё
-работает пакетно, без ручной разметки и без хардкода путей: тот же код запускается на новом
-датасете одной командой.
-
-Ключевой принцип это **надёжность и предсказуемость**. Вместо попытки «идеально распознать
-всё» конвейер уверенно обрабатывает понятные карты и **явно помечает** трудные
-(`low_confidence`, `georeferenced=no`), а не падает и не выдаёт мусор за результат.
+- [About the project](#about-the-project)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Example result](#example-result)
+- [Usage](#usage)
+- [What you get on output](#what-you-get-on-output)
+- [Georeferencing: Pulkovo 1942 to WGS84](#georeferencing-pulkovo-1942-to-wgs84)
+- [Results on a real dataset](#results-on-a-real-dataset)
+- [Project structure](#project-structure)
+- [Tests](#tests)
+- [Limitations](#limitations)
+- [Future work](#future-work)
 
 ---
 
-## Возможности
+## About the project
 
-| Возможность | Как реализовано |
+For decades, valuable Soviet-era geological data has stayed "frozen" inside scanned maps:
+faded paper, creases, pencil marks, coordinates in an outdated datum. These maps cannot be
+searched, analyzed, or overlaid onto modern GIS.
+
+**This project automates their digitization.** The input is a folder of scans; the output is
+machine-readable **vectors (GeoJSON + Shapefile)** tied to **WGS84**. Everything runs in
+batch, without manual annotation and without hardcoded paths: the same code runs on a new
+dataset with a single command.
+
+The key principle is **robustness and predictability**. Instead of trying to "perfectly
+recognize everything", the pipeline confidently processes clear maps and **explicitly flags**
+the hard ones (`low_confidence`, `georeferenced=no`) rather than crashing or passing off
+garbage as a result.
+
+---
+
+## Features
+
+| Feature | How it is implemented |
 |---|---|
-| **Извлечение цветных объектов** | HSV-порог: красные в разломы, зелёные и синие в границы слоёв |
-| **Извлечение тёмных линий** | Морфология *black-hat* плюс фильтр «длинные и тонкие» |
-| **Осевые векторы** | Скелетизация маски и трассировка полилиний (а не контур-«петля») |
-| **Геопривязка к WGS84** | Рамка карты и AOI, гомография, датум Пулково 1942 в WGS84 через `pyproj` |
-| **Извлечение легенды** | Цветные образцы легенды (плотные заливки) в `<карта>.legend.json`, связь с векторами по классу |
-| **SAM-режим (опц.)** | Флаг `--use-sam`: сегментация Segment Anything как альтернатива HSV; мягкий фолбэк, если не установлен |
-| **Гард от шума** | Отсечение легенды и полей по рамке, удаление краевых пятен старения |
-| **Честный триаж** | Сомнительные карты помечаются `low_confidence` с причиной |
-| **Два формата вывода** | GeoJSON (всегда) плюс Shapefile (если установлен `pyshp`) |
-| **Debug-«комикс»** | Каждый этап сохраняет картинку в `debug/` для визуальной проверки |
-| **Масштабируемость** | Около 100 карт за ~1.5 мин, без ручного вмешательства и без падений |
+| **Colored feature extraction** | HSV threshold: reds into faults, greens and blues into layer boundaries |
+| **Dark line extraction** | *Black-hat* morphology plus a "long and thin" filter |
+| **Centerline vectors** | Mask skeletonization and polyline tracing (not a contour "loop") |
+| **Georeferencing to WGS84** | Map frame and AOI, homography, Pulkovo 1942 to WGS84 via `pyproj` |
+| **Legend extraction** | Colored legend swatches (dense fills) into `<map>.legend.json`, linked to vectors by class |
+| **SAM mode (opt.)** | `--use-sam` flag: Segment Anything segmentation as an alternative to HSV; soft fallback if not installed |
+| **Noise guard** | Legend and margins cut off by the frame, aging edge-stains removed |
+| **Honest triage** | Dubious maps are flagged `low_confidence` with a reason |
+| **Two output formats** | GeoJSON (always) plus Shapefile (if `pyshp` is installed) |
+| **Debug "comic strip"** | Every stage saves an image to `debug/` for visual inspection |
+| **Scalability** | About 100 maps in ~1.5 min, no manual intervention and no crashes |
 
 ---
 
-## Как это работает
+## How it works
 
-Конвейер состоит из шести последовательных этапов. Каждый сохраняет промежуточный кадр в
-`debug/`, поэтому весь процесс можно «пролистать глазами».
+The pipeline consists of six sequential stages. Each one saves an intermediate frame to
+`debug/`, so the whole process can be "flipped through" by eye.
 
 ```
-   скан.jpg
+   scan.jpg
       |
       v
-[ preprocess ]   ресайз · CLAHE-контраст · денойз
+[ preprocess ]   resize · CLAHE contrast · denoise
       |
       v
-[  extract   ]   HSV-цвет (red/green/blue) · black-hat (тёмные линии) · Canny
-      |          плюс маска по рамке карты (отсечение полей и легенды)
+[  extract   ]   HSV color (red/green/blue) · black-hat (dark lines) · Canny
+      |          plus a map-frame mask (cuts off margins and legend)
       v
-[  cleanup   ]   морфология · фильтр мелочи · фильтр формы · гард краевых пятен
+[  cleanup   ]   morphology · small-blob filter · shape filter · edge-stain guard
       |
       v
-[ vectorize  ]   скелетизация в трассировку осевых полилиний (Douglas-Peucker)
+[ vectorize  ]   skeletonization into centerline polylines (Douglas-Peucker)
       |
       v
-[  georef    ]   углы рамки и AOI в гомографию, затем pyproj: EPSG:4284 в EPSG:4326
+[  georef    ]   frame and AOI corners into a homography, then pyproj: EPSG:4284 into EPSG:4326
       |
       v
 [  export    ]   GeoJSON · Shapefile · _summary.csv
 ```
 
-### Почему HSV для цвета
+### Why HSV for color
 
-В пространстве **HSV** цвет раскладывается на тон (H), насыщенность (S) и яркость (V).
-«Красная линия разлома» это узкий диапазон тона **H**, который почти не зависит от
-выцветания (оно сидит в яркости **V**). Поэтому порог по HSV (`cv2.inRange`) даёт простой
-и устойчивый способ «вырезать по цвету» даже на пожелтевшей бумаге. Красный тон в HSV
-«разорван» на концах круга, поэтому для него берутся **два** диапазона.
+In the **HSV** space, color splits into hue (H), saturation (S), and value/brightness (V).
+A "red fault line" is a narrow hue **H** range that barely depends on fading (fading lives in
+the value **V**). So an HSV threshold (`cv2.inRange`) gives a simple and robust way to
+"cut by color" even on yellowed paper. The red hue is "split" across the ends of the color
+wheel, so **two** ranges are used for it.
 
-### Почему осевые линии, а не контуры
+### Why centerlines instead of contours
 
-Если просто обвести цветное пятно контуром, линия превращается в замкнутую «петлю» (точки
-идут туда и обратно, длина задваивается). Мы вместо этого **утончаем маску до скелета в
-1 пиксель** (`scikit-image`) и трассируем его как настоящую полилинию: чище геометрия и
-корректная длина.
+If you simply trace a colored blob with a contour, the line turns into a closed "loop"
+(points go there and back, the length doubles). Instead we **thin the mask down to a
+1-pixel skeleton** (`scikit-image`) and trace it as a real polyline: cleaner geometry and a
+correct length.
 
 ---
 
-## Быстрый старт
+## Quick start
 
-> Требуется **Python 3.9+** (проверено на 3.14). Все зависимости ставятся готовыми
-> колёсами (wheels), без GDAL и без компиляции.
+> Requires **Python 3.9+** (tested on 3.14). All dependencies install as prebuilt wheels,
+> without GDAL and without compilation.
 
 ```bash
-# 1. Клонировать
+# 1. Clone
 git clone https://github.com/sakhmedi/tracktwo
 cd tracktwo
 
-# 2. Виртуальное окружение
+# 2. Virtual environment
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux / macOS
 
-# 3. Зависимости
+# 3. Dependencies
 pip install -r requirements.txt
 
-# 4. Запуск на готовом примере (с геопривязкой к WGS84)
+# 4. Run on the bundled example (with georeferencing to WGS84)
 python main.py --input examples/maps --output output --aoi examples/aoi
 ```
 
-Результат появится в `output/`: `example_original.geojson` (координаты WGS84), Shapefile
-и `_summary.csv`. Промежуточные кадры будут в `debug/example_original/`.
+The result appears in `output/`: `example_original.geojson` (WGS84 coordinates), a Shapefile
+and `_summary.csv`. Intermediate frames will be in `debug/example_original/`.
 
-Для своего датасета просто положите сканы в `input/` и выполните `python main.py`.
+For your own dataset, just drop the scans into `input/` and run `python main.py`.
 
-> **Опционально (SAM).** Базовый конвейер самодостаточен. Если хотите попробовать
-> Segment Anything: `pip install -r requirements-sam.txt`, скачайте чекпойнт `vit_b` в
-> `models/` и запустите с `--use-sam`. Без этих файлов флаг просто откатится на HSV-путь
-> с понятным сообщением — конвейер не упадёт.
+> **Optional (SAM).** The base pipeline is self-contained. If you want to try
+> Segment Anything: `pip install -r requirements-sam.txt`, download the `vit_b` checkpoint into
+> `models/` and run with `--use-sam`. Without these files the flag simply falls back to the
+> HSV path with a clear message — the pipeline does not crash.
 
 ---
 
-## Пример результата
+## Example result
 
-Карта «Торгай» (цветная геологическая карта): исходный скан и извлечённые осевые векторы
-поверх него.
+The "Torgai" map (a colored geological map): the original scan and the extracted centerline
+vectors overlaid on top of it.
 
-| Исходный скан | Найденные векторы |
+| Original scan | Detected vectors |
 |:---:|:---:|
-| ![Оригинал](examples/maps/example_original.jpg) | ![Векторы](examples/example_overlay.jpg) |
+| ![Original](examples/maps/example_original.jpg) | ![Vectors](examples/example_overlay.jpg) |
 
-Промежуточная бинарная маска красных разломов (после очистки), из которой строятся векторы:
+An intermediate binary mask of the red faults (after cleanup), from which the vectors are built:
 
 <div align="center">
 
-![Маска разломов](examples/example_mask_red.png)
+![Fault mask](examples/example_mask_red.png)
 
 </div>
 
-Готовый геопривязанный выход лежит в [`examples/example_original.geojson`](examples/example_original.geojson)
-(координаты WGS84), а иллюстративный AOI находится в [`examples/aoi/`](examples/aoi). Команда
-из [быстрого старта](#быстрый-старт) воспроизводит этот результат один в один.
+The finished georeferenced output is in [`examples/example_original.geojson`](examples/example_original.geojson)
+(WGS84 coordinates), and an illustrative AOI is in [`examples/aoi/`](examples/aoi). The command
+from [Quick start](#quick-start) reproduces this result one to one.
 
-> Все картинки и GeoJSON в `examples/` сгенерированы **текущим** кодом, поэтому то, что
-> вы видите при запуске, совпадает с показанным здесь. Охват AOI «Торгай» приблизительный,
-> для демонстрации перехода Пулково 1942 в WGS84.
+> All images and the GeoJSON in `examples/` were generated by the **current** code, so what
+> you see when you run it matches what is shown here. The "Torgai" AOI extent is approximate,
+> for demonstrating the Pulkovo 1942 to WGS84 transition.
 
 ---
 
-## Использование
+## Usage
 
 ```bash
 python main.py [--input DIR] [--output DIR] [--debug DIR] [--profile NAME] [--aoi PATH] [--no-debug] [--use-sam]
 ```
 
-| Аргумент | По умолчанию | Назначение |
+| Argument | Default | Purpose |
 |----------|:------------:|------------|
-| `--input`    | `input`      | папка со сканами (поиск **рекурсивный**, по подпапкам) |
-| `--output`   | `output`     | куда писать GeoJSON, Shapefile и сводку |
-| `--debug`    | `debug`      | куда писать промежуточные картинки |
-| `--profile`  | `geological` | набор цветовых порогов: `geological` или `pencil` |
-| `--aoi`      | `(нет)`      | папка или файл с Area of Interest для геопривязки. Без него координаты пиксельные |
-| `--no-debug` | `(нет)`      | не сохранять промежуточные картинки (быстрее) |
-| `--use-sam`  | `(нет)`      | опц. сегментация Segment Anything (нужен `requirements-sam.txt` + чекпойнт; иначе фолбэк на HSV) |
+| `--input`    | `input`      | folder of scans (search is **recursive**, into subfolders) |
+| `--output`   | `output`     | where to write GeoJSON, Shapefile and the summary |
+| `--debug`    | `debug`      | where to write intermediate images |
+| `--profile`  | `geological` | set of color thresholds: `geological` or `pencil` |
+| `--aoi`      | `(none)`     | folder or file with the Area of Interest for georeferencing. Without it, coordinates stay in pixels |
+| `--no-debug` | `(none)`     | do not save intermediate images (faster) |
+| `--use-sam`  | `(none)`     | opt. Segment Anything segmentation (needs `requirements-sam.txt` + checkpoint; otherwise falls back to HSV) |
 
 ```bash
-# Пример: произвольная папка, без правок кода
-python main.py --input "путь/к/сканам" --output output --profile geological --aoi aoi
+# Example: an arbitrary folder, no code changes
+python main.py --input "path/to/scans" --output output --profile geological --aoi aoi
 ```
 
-> **Никакого хардкода путей и имён файлов.** Обрабатываются все изображения из указанной
-> папки, поэтому конвейер запускается на новом датасете без изменений.
+> **No hardcoded paths or file names.** All images from the given folder are processed, so the
+> pipeline runs on a new dataset without changes.
 
 ---
 
-## Что получается на выходе
+## What you get on output
 
-В папке `output/` для каждой карты:
+In the `output/` folder, for each map:
 
-- **`<карта>.geojson`** содержит `FeatureCollection` из линий (`LineString`). В свойствах
-  каждой линии: исходная карта, тип (`fault` / `fault_uncertain` / `boundary` / `edge`),
-  цвет-источник и длина. В `metadata` указано, геопривязана ли карта, исходный и целевой
-  CRS, а также RMS-ошибка привязки.
-- **`<карта>.shp`** (плюс `.dbf` / `.shx` / `.prj`) содержит те же линии в Shapefile *(если
-  установлен `pyshp`)*.
+- **`<map>.geojson`** contains a `FeatureCollection` of lines (`LineString`). Each line's
+  properties: the source map, the type (`fault` / `fault_uncertain` / `boundary` / `edge`),
+  the source color and the length. `metadata` states whether the map is georeferenced, the
+  source and target CRS, as well as the referencing RMS error.
+- **`<map>.shp`** (plus `.dbf` / `.shx` / `.prj`) contains the same lines as a Shapefile *(if
+  `pyshp` is installed)*.
 
-- **`<карта>.legend.json`** (если на карте найдены образцы легенды) содержит распознанные
-  цветные образцы условных обозначений: цвет, класс (`fault`/`boundary`), bbox, средний HSV
-  и связь с векторами того же класса. Сводка по цветам дублируется в `metadata.legend`
-  внутри GeoJSON. OCR подписей слоёв (кириллица) намеренно не делается — это задача Трека 1.
+- **`<map>.legend.json`** (if legend swatches were found on the map) contains the recognized
+  colored legend swatches: color, class (`fault`/`boundary`), bbox, mean HSV and a link to
+  vectors of the same class. A per-color summary is also duplicated in `metadata.legend`
+  inside the GeoJSON. OCR of the layer labels (Cyrillic) is intentionally not done — that is
+  a Track 1 task.
 
-Плюс один общий файл:
+Plus one shared file:
 
-- **`_summary.csv`** это сводный отчёт по всем картам: `status`, `confidence` (`ok`/`low`),
-  число объектов, число образцов легенды, `georeferenced` (yes/no), `crs`, RMS привязки и
-  причина пометки. Сразу видно, где результат надёжен, а где карта оказалась трудной.
+- **`_summary.csv`** is a consolidated report over all maps: `status`, `confidence`
+  (`ok`/`low`), feature count, legend-swatch count, `georeferenced` (yes/no), `crs`,
+  referencing RMS and the flag reason. It shows at a glance where the result is reliable and
+  where the map turned out to be hard.
 
 ---
 
-## Геопривязка: Пулково 1942 в WGS84
+## Georeferencing: Pulkovo 1942 to WGS84
 
-Главная задача Трека 2 это не просто векторы в пикселях, а **векторы в реальных координатах**.
+The core Track 2 task is not just vectors in pixels, but **vectors in real-world coordinates**.
 
-**Как строится привязка (автоматически, без ручной расстановки точек):**
+**How the referencing is built (automatically, without manually placing points):**
 
-1. Детектируется прямоугольная **рамка карты** (neat-line), берутся её 4 угла в пикселях.
-2. Берётся заданная **Area of Interest**, её 4 угла в координатах местности.
-3. Строится **гомография** пиксель в координаты AOI (`cv2.getPerspectiveTransform`).
-4. `pyproj` переводит результат из **Пулково 1942 (EPSG:4284)** в **WGS84 (EPSG:4326)**.
+1. The rectangular **map frame** (neat-line) is detected, and its 4 corners are taken in pixels.
+2. The given **Area of Interest** is taken, its 4 corners in ground coordinates.
+3. A **homography** pixel to AOI coordinates is built (`cv2.getPerspectiveTransform`).
+4. `pyproj` converts the result from **Pulkovo 1942 (EPSG:4284)** to **WGS84 (EPSG:4326)**.
 
-> **Ловушка датума.** Советские координаты это Пулково 1942, а не WGS84. Если их принять
-> за WGS84, получится сдвиг **100+ метров**. Мы используем явный код `EPSG:4284` и `pyproj`,
-> поэтому переход корректный.
+> **The datum trap.** Soviet coordinates are Pulkovo 1942, not WGS84. If you treat them as
+> WGS84, you get a **100+ meter** shift. We use the explicit `EPSG:4284` code and `pyproj`,
+> so the transition is correct.
 
-**Координаты на выходе:**
+**Output coordinates:**
 
-| Режим | Результат |
+| Mode | Result |
 |---|---|
-| **с `--aoi`** | WGS84 `[lon, lat]`, `crs: EPSG:4326`, `georeferenced: true`, RMS в метаданных |
-| **без `--aoi`** (или рамка/AOI не распознаны) | пиксели (x вправо, y вниз), `georeferenced: false` (запасной режим) |
+| **with `--aoi`** | WGS84 `[lon, lat]`, `crs: EPSG:4326`, `georeferenced: true`, RMS in metadata |
+| **without `--aoi`** (or frame/AOI not detected) | pixels (x right, y down), `georeferenced: false` (fallback mode) |
 
-**Формат AOI** это папка с сайдкарами по имени карты (`<карта>.geojson` / `.txt`) **или**
-один файл на весь датасет:
+**The AOI format** is either a folder of sidecars named after the map (`<map>.geojson` /
+`.txt`) **or** a single file for the whole dataset:
 
-- **GeoJSON** содержит полигон области (берётся внешнее кольцо или охват); CRS из поля `crs`.
-- **TXT** содержит либо 4 строки `lon lat`, либо одну строку `minlon minlat maxlon maxlat`
-  (bbox); необязательная первая строка `# epsg=4284` задаёт исходный CRS.
+- **GeoJSON** contains the area polygon (the outer ring or extent is taken); CRS from the `crs` field.
+- **TXT** contains either 4 lines of `lon lat`, or a single line `minlon minlat maxlon maxlat`
+  (bbox); an optional first line `# epsg=4284` sets the source CRS.
 
-Если AOI задан в WGS84, укажите `# epsg=4326` (или `crs` в GeoJSON), и переход датума станет
-тождественным.
+If the AOI is given in WGS84, specify `# epsg=4326` (or `crs` in the GeoJSON), and the datum
+transition becomes the identity.
 
 ---
 
-## Результаты на реальном датасете
+## Results on a real dataset
 
-Прогон на **94 реальных картах** хакатона (две папки датасета Трек 2 и 3):
+A run on **94 real hackathon maps** (the two folders of the Track 2 and 3 dataset):
 
-| Метрика | Значение |
+| Metric | Value |
 |---|---|
-| Обработано без падений | **94 / 94** |
-| Время | **~1.5 мин** (около 1 с на карту) |
-| Извлечено объектов | **6 913** |
-| Помечено `low_confidence` (триаж) | 38 |
-| Краевого мусора убрано гардом | **~1 800 ложных линий** |
+| Processed without crashes | **94 / 94** |
+| Time | **~1.5 min** (about 1 s per map) |
+| Features extracted | **6,913** |
+| Flagged `low_confidence` (triage) | 38 |
+| Edge garbage removed by the guard | **~1,800 false lines** |
 
-На **чистых цветных** геологических картах конвейер уверенно трассирует красные разломы и
-зелёные границы как аккуратные осевые линии. **Выцветшие сепия-сканы** с пятнами старения
-либо очищаются гардом, либо помечаются `low_confidence`, поэтому сразу понятно, каким
-картам можно доверять.
+On **clean colored** geological maps the pipeline confidently traces red faults and green
+boundaries as tidy centerlines. **Faded sepia scans** with aging stains are either cleaned up
+by the guard or flagged `low_confidence`, so it is immediately clear which maps can be trusted.
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```
 tracktwo/
-├── main.py                 # точка входа: разбор аргументов, обход папки, прогресс
-├── requirements.txt        # зависимости (ставятся колёсами, без GDAL)
-├── requirements-sam.txt    # ОПЦ. зависимости для --use-sam (torch + segment-anything)
+├── main.py                 # entry point: argument parsing, folder walk, progress
+├── requirements.txt        # dependencies (install as wheels, no GDAL)
+├── requirements-sam.txt    # OPT. dependencies for --use-sam (torch + segment-anything)
 ├── src/
-│   ├── config.py           # ВСЕ «магические числа»: пороги HSV/тёмных линий, ядра, EPSG
-│   ├── io_utils.py         # поиск картинок, чтение (кириллица-safe), debug-сейвер
-│   ├── preprocess.py       # ресайз, CLAHE-контраст, денойз
-│   ├── crop.py             # детекция рамки карты (neat-line)
-│   ├── extract.py          # выделение объектов: HSV, black-hat, Canny (+ опц. SAM)
-│   ├── cleanup.py          # морфология, фильтры формы, гард краевых пятен
-│   ├── vectorize.py        # скелетизация в осевые полилинии
-│   ├── legend.py           # извлечение цветных образцов легенды и связь с векторами
-│   ├── sam_extract.py      # ОПЦ. сегментатор Segment Anything (мягкий фолбэк на HSV)
-│   ├── georef.py           # рамка и AOI в гомографию, затем Пулково 1942 в WGS84
-│   ├── export.py           # запись GeoJSON / Shapefile / legend.json / _summary.csv
-│   └── pipeline.py         # склейка всех этапов для одной карты плюс триаж
+│   ├── config.py           # ALL the "magic numbers": HSV/dark-line thresholds, kernels, EPSG
+│   ├── io_utils.py         # image discovery, reading (Cyrillic-safe), debug saver
+│   ├── preprocess.py       # resize, CLAHE contrast, denoise
+│   ├── crop.py             # map-frame (neat-line) detection
+│   ├── extract.py          # feature extraction: HSV, black-hat, Canny (+ opt. SAM)
+│   ├── cleanup.py          # morphology, shape filters, edge-stain guard
+│   ├── vectorize.py        # skeletonization into centerline polylines
+│   ├── legend.py           # legend-swatch extraction and linking to vectors
+│   ├── sam_extract.py      # OPT. Segment Anything segmenter (soft fallback to HSV)
+│   ├── georef.py           # frame and AOI into a homography, then Pulkovo 1942 into WGS84
+│   ├── export.py           # writing GeoJSON / Shapefile / legend.json / _summary.csv
+│   └── pipeline.py         # gluing all stages for one map plus triage
 ├── tests/
-│   └── test_smoke.py       # end-to-end smoke-тест
-├── examples/               # пример входа, выхода, AOI и debug-картинок
-├── input/  output/  debug/ # рабочие папки (содержимое в .gitignore)
+│   └── test_smoke.py       # end-to-end smoke test
+├── examples/               # example input, output, AOI and debug images
+├── input/  output/  debug/ # working folders (contents in .gitignore)
 ```
 
-> Все настраиваемые параметры собраны в одном месте, в **`src/config.py`**. Чтобы
-> подстроить конвейер под другой датасет, правьте числа там, а не ищите по всему коду.
+> All tunable parameters are collected in one place, in **`src/config.py`**. To adapt the
+> pipeline to a different dataset, edit the numbers there rather than hunting through the code.
 
-### Этапы и debug-кадры
+### Stages and debug frames
 
-Для каждой карты в `debug/<карта>/` сохраняется пронумерованная серия кадров:
+For each map, a numbered series of frames is saved in `debug/<map>/`:
 
-| Кадр (по порядку) | Этап |
+| Frame (in order) | Stage |
 |------|------|
-| `original` | исходный скан |
-| `resized` | ужатый до рабочего размера |
-| `clahe` | усиленный контраст (CLAHE по яркости, цвета сохранены) |
-| `denoised` | серый плюс сглаживание |
-| `mask_red/green/blue` | «сырые» цветовые маски (HSV-порог) |
-| `mask_dark` | тёмные чернильные линии (black-hat) |
-| `canny` | края (для карт без цвета) |
-| `frame_mask` | область внутри рамки карты (поля и легенда отсечены) |
-| `mask_combined` | объединённая маска |
-| `clean_*` | маски после очистки (морфология плюс фильтр формы) |
-| `clean_combined` | итоговая чистая маска |
-| `vectors_overlay` | **осевые векторы поверх оригинала**, главная проверка качества |
-| `legend_swatches` | найденные образцы легенды, обведённые рамкой (если легенда есть) |
+| `original` | the source scan |
+| `resized` | shrunk to the working size |
+| `clahe` | enhanced contrast (CLAHE on brightness, colors preserved) |
+| `denoised` | grayscale plus smoothing |
+| `mask_red/green/blue` | "raw" color masks (HSV threshold) |
+| `mask_dark` | dark ink lines (black-hat) |
+| `canny` | edges (for maps without color) |
+| `frame_mask` | the area inside the map frame (margins and legend cut off) |
+| `mask_combined` | the merged mask |
+| `clean_*` | masks after cleanup (morphology plus shape filter) |
+| `clean_combined` | the final clean mask |
+| `vectors_overlay` | **centerline vectors over the original**, the main quality check |
+| `legend_swatches` | detected legend swatches, boxed (if a legend is present) |
 
 ---
 
-## Тесты
+## Tests
 
 ```bash
 python -m pytest
 ```
 
-End-to-end smoke-тест (`tests/test_smoke.py`) гоняет конвейер на
-`examples/maps/example_original.jpg`, проверяет валидность GeoJSON, наличие сводки и
-корректный фолбэк при отсутствии входной папки.
+The end-to-end smoke test (`tests/test_smoke.py`) runs the pipeline on
+`examples/maps/example_original.jpg`, checks GeoJSON validity, the presence of a summary, and
+correct fallback when the input folder is missing.
 
 ---
 
-## Ограничения
+## Limitations
 
-- **Цветовые пороги не универсальны.** Диапазоны HSV настроены под имеющиеся сканы; на
-  другом датасете могут потребовать подстройки. Все пороги лежат в `src/config.py`, есть
-  профили (`--profile`), и конвейер **не падает** на «непонятных» картах.
-- **Тёмные линии на картах с рельефной штриховкой.** Black-hat ловит сильные чернильные
-  линеаменты, но слабые разломы переплетены со штриховкой рельефа и ловятся неполно. Фильтр
-  формы (`DARK_MIN_LENGTH` / `DARK_MAX_THICKNESS`) оставляет только длинные тонкие компоненты.
-- **Кальки и серые чертежи** обрабатываются слабо (цвета нет) и помечаются `low`.
-- **Геопривязка приближённая.** Строится по углам рамки и AOI (гомография 4 точек). Если
-  рамка детектится неточно или AOI задан грубым bbox, возможен сдвиг. RMS пишется в
-  метаданные; без рамки или AOI карта остаётся в пикселях, а не привязывается наугад.
-- **Легенда: отсекаем, а не интерпретируем.** Легенда и поля убираются маской по рамке
-  (`MASK_OUTSIDE_FRAME`), чтобы цветные образцы из легенды не давали ложные вектора. Это
-  сознательный выбор в пользу чистоты результата: распознавание самой легенды (образец цвета
-  в подпись слоя) пока не реализовано. Если рамка не найдена, образцы легенды могут попасть
-  в результат и помечаются триажем.
-- **Геологические разрезы** (cross-sections) сейчас не обрабатываются отдельно: конвейер
-  заточен под карты в плане. Разрез пройдёт по тем же правилам (цвет/тёмные линии), но без
-  специальной логики осей глубины и масштаба.
-- **Краевые пятна старения** (сепия по краям) ложно ловятся красным порогом. Гард
-  `DROP_BORDER_TOUCHING` убирает объекты, касающиеся края кадра, а триаж `EDGE_NOISE_FRAC`
-  помечает такие карты `low_confidence`.
+- **Color thresholds are not universal.** The HSV ranges are tuned for the scans at hand; on a
+  different dataset they may need adjustment. All thresholds live in `src/config.py`, there are
+  profiles (`--profile`), and the pipeline **does not crash** on "unclear" maps.
+- **Dark lines on maps with relief hatching.** Black-hat catches strong ink lineaments, but
+  weak faults are interwoven with the relief hatching and are caught incompletely. The shape
+  filter (`DARK_MIN_LENGTH` / `DARK_MAX_THICKNESS`) keeps only long thin components.
+- **Tracing paper and gray drawings** are handled weakly (there is no color) and flagged `low`.
+- **Georeferencing is approximate.** It is built from the frame and AOI corners (a 4-point
+  homography). If the frame is detected imprecisely or the AOI is given as a coarse bbox, a
+  shift is possible. The RMS is written to the metadata; without a frame or AOI the map stays
+  in pixels rather than being referenced at random.
+- **Legend: we cut it off, we don't interpret it.** The legend and margins are removed by the
+  frame mask (`MASK_OUTSIDE_FRAME`) so that colored legend swatches do not produce false
+  vectors. This is a deliberate choice in favor of a clean result: recognizing the legend
+  itself (color swatch to layer label) is not implemented yet. If the frame is not found,
+  legend swatches may leak into the result and are caught by triage.
+- **Geological cross-sections** are currently not handled separately: the pipeline is tuned for
+  plan-view maps. A cross-section will go through the same rules (color/dark lines) but without
+  special logic for depth axes and scale.
+- **Aging edge-stains** (sepia along the edges) are falsely caught by the red threshold. The
+  `DROP_BORDER_TOUCHING` guard removes components touching the frame edge, and the
+  `EDGE_NOISE_FRAC` triage flags such maps `low_confidence`.
 
-> Это **сознательная стратегия**: лучше надёжно обработать понятный подтип карт и явно
-> отметить остальные, чем сломаться на всех.
+> This is a **deliberate strategy**: it is better to reliably process a clear subtype of maps
+> and explicitly flag the rest than to break on all of them.
 
 ---
 
-## Дальнейшее развитие
+## Future work
 
-- Геопривязка по **координатной сетке самой карты** (OCR подписей градусной сетки) вместо
-  опоры на AOI, точнее на картах с подписанной рамкой.
-- Сшивание дальних сегментов одной линии (сейчас сшиваются только близкие).
-- Разделение пересекающихся разломов на развилках скелета.
-- **OCR подписей легенды** (кириллица) поверх уже извлечённых цветных образцов — связка с
-  Треком 1, чтобы каждый класс получил человекочитаемое название слоя.
-- Углубление **SAM-режима** (`--use-sam` уже есть): дообучение/подсказки по точкам вместо
-  автоматической сегментации, объединение с цветовым приором.
+- Georeferencing from the **map's own coordinate grid** (OCR of graticule labels) instead of
+  relying on the AOI, more accurate on maps with a labeled frame.
+- Stitching distant segments of the same line (currently only nearby ones are stitched).
+- Splitting intersecting faults at skeleton junctions.
+- **OCR of legend labels** (Cyrillic) on top of the already extracted color swatches — a link
+  with Track 1, so that each class gets a human-readable layer name.
+- Deepening the **SAM mode** (`--use-sam` already exists): fine-tuning / point prompts instead
+  of automatic segmentation, combined with a color prior.
 
 ---
 
 <div align="center">
-<sub>Сделано для хакатона <b>TerraSoviet Data Rescue</b> · Трек 2 · классическое CV без обучения нейросетей</sub>
+<sub>Made for the <b>TerraSoviet Data Rescue</b> hackathon · Track 2 · classic CV, no neural-network training</sub>
 </div>

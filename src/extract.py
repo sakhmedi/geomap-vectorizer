@@ -1,14 +1,14 @@
 """
-extract.py — этап 3: выделение объектов. САМЫЙ важный этап.
+extract.py — stage 3: feature extraction. The MOST important stage.
 
-Две независимые ветки:
-  1) Цвет (HSV): переводим цветной кадр в HSV и для каждого «целевого цвета»
-     из профиля (config.PROFILES) вырезаем пиксели в заданном диапазоне -> бинарная маска.
-  2) Края (Canny): по серому кадру ищем границы. Это запасной путь для калек,
-     где цвета нет.
+Two independent branches:
+  1) Color (HSV): convert the color frame to HSV and, for each "target color"
+     from the profile (config.PROFILES), cut out pixels in the given range -> a binary mask.
+  2) Edges (Canny): find boundaries in the gray frame. This is the fallback path for
+     tracing paper, where there is no color.
 
-На выходе — словарь с масками. Белое (255) = «здесь объект», чёрное (0) = фон.
-Каждая маска сохраняется в debug, чтобы видеть глазами, что именно поймалось.
+On output — a dict of masks. White (255) = "there is a feature here", black (0) = background.
+Each mask is saved to debug, so you can see by eye what exactly was caught.
 """
 
 import cv2
@@ -19,46 +19,46 @@ from src import config, crop
 
 def extract(prepared, profile_name, saver, use_sam=False):
     """
-    prepared — словарь из preprocess: {"color": BGR, "gray": серый}.
-    profile_name — какой набор цветов брать из config.PROFILES.
-    saver — DebugSaver для промежуточных кадров.
-    use_sam — если True и SAM доступен, дополнить цветовые маски сегментами SAM.
+    prepared — the dict from preprocess: {"color": BGR, "gray": gray}.
+    profile_name — which set of colors to take from config.PROFILES.
+    saver — DebugSaver for intermediate frames.
+    use_sam — if True and SAM is available, augment the color masks with SAM segments.
 
-    Возвращает:
+    Returns:
       {
         "color_masks": {"red": {"mask": ndarray, "type": "fault"}, ...},
         "canny": ndarray | None,
-        "combined": ndarray,   # объединение всех цветных масок (для наглядности)
+        "combined": ndarray,   # union of all color masks (for illustration)
       }
     """
     color_image = prepared["color"]
     gray_image = prepared["gray"]
     profile = config.PROFILES.get(profile_name, {})
 
-    # Переводим в HSV один раз (дальше все цвета режем из него).
+    # Convert to HSV once (all colors are cut from it afterwards).
     hsv = cv2.cvtColor(color_image, cv2.COLOR_BGR2HSV)
 
     color_masks = {}
-    # Пустая «нулевая» маска нужного размера, в неё накапливаем объединение.
+    # An empty "zero" mask of the right size, into which we accumulate the union.
     combined = np.zeros(gray_image.shape, dtype=np.uint8)
 
-    # --- Ветка 1: цвет ---
+    # --- Branch 1: color ---
     for color_name, spec in profile.items():
         mask = _mask_for_color(hsv, spec["ranges"])
         color_masks[color_name] = {"mask": mask, "type": spec["type"]}
         combined = cv2.bitwise_or(combined, mask)
         saver.save(f"mask_{color_name}", mask)
 
-    # --- Ветка 1c (опц.): SAM как альтернативный сегментатор границ слоёв ---
-    # Тяжёлый путь, только под флагом. Если SAM/torch/чекпойнт недоступны —
-    # sam_extract печатает подсказку и возвращает None (тихий фолбэк на классику).
+    # --- Branch 1c (opt.): SAM as an alternative layer-boundary segmenter ---
+    # The heavy path, only under the flag. If SAM/torch/checkpoint are unavailable —
+    # sam_extract prints a hint and returns None (silent fallback to the classic path).
     if use_sam:
         from src import sam_extract
         sam_masks = sam_extract.extract_color_masks(color_image, profile, saver)
         if sam_masks:
             for color_name, sam_mask in sam_masks.items():
                 if color_name in color_masks:
-                    # Объединяем с цветовой маской того же класса (SAM дополняет HSV).
+                    # Merge with the color mask of the same class (SAM augments HSV).
                     color_masks[color_name]["mask"] = cv2.bitwise_or(
                         color_masks[color_name]["mask"], sam_mask)
                 else:
@@ -67,21 +67,21 @@ def extract(prepared, profile_name, saver, use_sam=False):
                 combined = cv2.bitwise_or(combined, sam_mask)
             saver.save("mask_sam_combined", combined)
 
-    # --- Ветка 1b: тёмные линии (разломы чернилами/карандашом) ---
-    # На многих картах разломы — тёмные, а не цветные; HSV их не ловит.
+    # --- Branch 1b: dark lines (ink/pencil faults) ---
+    # On many maps the faults are dark, not colored; HSV does not catch them.
     if config.EXTRACT_DARK_LINES:
         dark = _extract_dark_lines(gray_image)
         color_masks["dark"] = {"mask": dark, "type": "fault_uncertain"}
         combined = cv2.bitwise_or(combined, dark)
         saver.save("mask_dark", dark)
 
-    # --- Ветка 2: края (Canny) ---
+    # --- Branch 2: edges (Canny) ---
     canny = None
     if config.USE_CANNY:
         canny = cv2.Canny(gray_image, config.CANNY_THRESHOLD_LOW, config.CANNY_THRESHOLD_HIGH)
         saver.save("canny", canny)
 
-    # --- Маскируем всё за пределами рамки карты (поля, легенда, штамп) ---
+    # --- Mask out everything outside the map frame (margins, legend, stamp) ---
     if config.MASK_OUTSIDE_FRAME:
         frame_mask = _frame_interior_mask(color_image)
         if frame_mask is not None:
@@ -99,8 +99,8 @@ def extract(prepared, profile_name, saver, use_sam=False):
 
 def _frame_interior_mask(color_image):
     """
-    Бинарная маска внутренней области рамки карты (белое = внутри рамки).
-    None, если рамка не найдена — тогда ничего не маскируем (безопасный откат).
+    A binary mask of the map frame's interior (white = inside the frame).
+    None if the frame is not found — then nothing is masked (safe fallback).
     """
     quad = crop.find_map_corners(color_image)
     if quad is None:
@@ -113,11 +113,11 @@ def _frame_interior_mask(color_image):
 
 def _extract_dark_lines(gray):
     """
-    Выделить тёмные тонкие линии (вероятные разломы) операцией black-hat.
+    Extract thin dark lines (probable faults) with the black-hat operation.
 
-    Black-hat = closing(gray) - gray: подсвечивает тёмные структуры тоньше ядра
-    на более светлом фоне. Дальше порог -> бинарная маска тёмных штрихов.
-    Форму (длинные/тонкие vs кляксы) отфильтрует этап cleanup.
+    Black-hat = closing(gray) - gray: it highlights dark structures thinner than the
+    kernel on a lighter background. Then a threshold -> a binary mask of dark strokes.
+    The shape (long/thin vs blobs) is filtered by the cleanup stage.
     """
     k = config.DARK_BLACKHAT_KERNEL
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
@@ -127,15 +127,15 @@ def _extract_dark_lines(gray):
 
 
 def color_mask(hsv, ranges):
-    """Публичная обёртка над _mask_for_color (нужна legend.py для тех же порогов)."""
+    """Public wrapper over _mask_for_color (needed by legend.py for the same thresholds)."""
     return _mask_for_color(hsv, ranges)
 
 
 def _mask_for_color(hsv, ranges):
     """
-    Собрать одну бинарную маску для цвета, у которого может быть НЕСКОЛЬКО диапазонов
-    HSV (например, красный — два диапазона по краям круга тонов).
-    Маски диапазонов объединяем логическим ИЛИ.
+    Build one binary mask for a color that may have SEVERAL HSV ranges
+    (for example, red — two ranges at the ends of the hue wheel).
+    The range masks are merged with a logical OR.
     """
     h, w = hsv.shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)

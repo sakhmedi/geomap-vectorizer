@@ -1,3 +1,3 @@
-# Иллюстративный охват района «Торгай» в Пулково 1942 (приблизительно, для демонстрации)
+# Illustrative extent of the "Torgai" area in Pulkovo 1942 (approximate, for demonstration)
 # epsg=4284
 62.80 49.40 63.40 49.05

@@ -1,13 +1,13 @@
-# Виртуальное окружение Python (у каждого своё, в репозиторий не кладём)
+# Python virtual environment (everyone has their own, not committed to the repo)
 .venv/
 venv/
 
-# Кэш Python
+# Python cache
 __pycache__/
 *.pyc
 
-# Результаты работы программы — генерируются заново при запуске,
-# поэтому сами файлы не храним в git, но СОХРАНЯЕМ пустые папки (.gitkeep).
+# Program outputs — regenerated on each run, so we don't store the files
+# themselves in git, but we KEEP the empty folders (.gitkeep).
 debug/*
 !debug/.gitkeep
 output/*
@@ -15,6 +15,6 @@ output/*
 input/*
 !input/.gitkeep
 
-# Чекпойнты SAM (большие, скачиваются отдельно — см. requirements-sam.txt)
+# SAM checkpoints (large, downloaded separately — see requirements-sam.txt)
 models/*.pth
 models/*.pt

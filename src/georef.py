@@ -1,20 +1,20 @@
 """
-georef.py — геопривязка вектора: пиксели карты -> WGS84 (широта/долгота).
+georef.py — georeferencing the vectors: map pixels -> WGS84 (latitude/longitude).
 
-Идея, которую можно автоматизировать без ручной расстановки точек:
-  1) находим прямоугольную рамку карты (neat-line) -> 4 угла в пикселях (GCP);
-  2) берём заданную Area of Interest (AOI) -> 4 угла в координатах местности;
-  3) строим гомографию пиксель -> координаты AOI (cv2.getPerspectiveTransform);
-  4) переводим результат в WGS84 через pyproj.
+The idea, which can be automated without manually placing points:
+  1) find the rectangular map frame (neat-line) -> 4 corners in pixels (GCPs);
+  2) take the given Area of Interest (AOI) -> 4 corners in ground coordinates;
+  3) build a homography pixel -> AOI coordinates (cv2.getPerspectiveTransform);
+  4) convert the result to WGS84 via pyproj.
 
-ВАЖНО про датум (совет ментора): советские карты — это Пулково 1942, а НЕ WGS84.
-Если воспринять их координаты как WGS84, получишь сдвиг ~100+ м. Поэтому исходный CRS
-AOI по умолчанию EPSG:4284 (Пулково 1942), и мы ЯВНО трансформируем его в EPSG:4326
-(WGS84) через pyproj. Если AOI уже в WGS84 — укажите его EPSG, и трансформация станет
-почти тождественной (но честной).
+IMPORTANT about the datum (mentor's advice): Soviet maps are Pulkovo 1942, NOT WGS84.
+If you treat their coordinates as WGS84, you get a ~100+ m shift. So the AOI's source CRS
+defaults to EPSG:4284 (Pulkovo 1942), and we EXPLICITLY transform it to EPSG:4326 (WGS84)
+via pyproj. If the AOI is already in WGS84 — specify its EPSG, and the transformation
+becomes nearly the identity (but honest).
 
-Если рамка не найдена или AOI нет — возвращаем None и пайплайн честно остаётся в
-пикселях (georeferenced=no). Лучше отдать пиксели, чем «привязать» наугад.
+If the frame is not found or there is no AOI — we return None and the pipeline honestly
+stays in pixels (georeferenced=no). Better to hand over pixels than to "reference" at random.
 """
 
 import json
@@ -25,18 +25,18 @@ import numpy as np
 
 from src import config, crop
 
-# pyproj — единственная обязательная новая зависимость геопривязки.
+# pyproj — the only mandatory new georeferencing dependency.
 try:
     from pyproj import Transformer
     _HAS_PYPROJ = True
-except ImportError:  # pragma: no cover - окружение без pyproj
+except ImportError:  # pragma: no cover - environment without pyproj
     _HAS_PYPROJ = False
 
 
 class GeoTransform:
     """
-    Готовая привязка одной карты: гомография (пиксель -> исходный CRS) + датум-переход
-    в WGS84. Зовите .to_wgs84(points) для перевода списка точек (x, y).
+    A ready referencing for one map: a homography (pixel -> source CRS) + a datum shift
+    to WGS84. Call .to_wgs84(points) to convert a list of (x, y) points.
     """
 
     def __init__(self, homography, source_epsg, gcp_count, rms_px):
@@ -45,32 +45,32 @@ class GeoTransform:
         self.gcp_count = gcp_count
         self.rms_px = rms_px
         if not _HAS_PYPROJ:
-            raise RuntimeError("pyproj не установлен — геопривязка недоступна")
-        # always_xy=True: на вход/выход (долгота, широта), а не (широта, долгота).
+            raise RuntimeError("pyproj is not installed — georeferencing is unavailable")
+        # always_xy=True: input/output are (longitude, latitude), not (latitude, longitude).
         self._to_wgs84 = Transformer.from_crs(
             f"EPSG:{source_epsg}", "EPSG:4326", always_xy=True
         )
 
     def to_wgs84(self, points):
-        """points — список (x_px, y_px). Возвращает список (lon, lat) в WGS84."""
+        """points — a list of (x_px, y_px). Returns a list of (lon, lat) in WGS84."""
         if not points:
             return []
         src = np.array(points, dtype=np.float64).reshape(-1, 1, 2)
-        # 1) пиксель -> координаты исходного CRS (Пулково 1942 по умолчанию)
+        # 1) pixel -> source CRS coordinates (Pulkovo 1942 by default)
         proj = cv2.perspectiveTransform(src, self.homography).reshape(-1, 2)
-        # 2) исходный CRS -> WGS84 (учёт сдвига датума)
+        # 2) source CRS -> WGS84 (accounting for the datum shift)
         lon, lat = self._to_wgs84.transform(proj[:, 0], proj[:, 1])
         return list(zip(lon.tolist(), lat.tolist()))
 
 
 # ----------------------------------------------------------------------------
-# Шаг 1: углы рамки карты в пикселях (GCP)
+# Step 1: map frame corners in pixels (GCPs)
 # ----------------------------------------------------------------------------
 
 def find_corner_gcps(image):
     """
-    Найти 4 угла рамки карты в пикселях, упорядоченные TL, TR, BR, BL.
-    Переиспользует детектор прямоугольника из crop.py. None, если рамки нет.
+    Find the 4 map frame corners in pixels, ordered TL, TR, BR, BL.
+    Reuses the rectangle detector from crop.py. None if there is no frame.
     """
     quad = crop.find_map_corners(image)
     if quad is None:
@@ -79,7 +79,7 @@ def find_corner_gcps(image):
 
 
 def _order_corners(pts):
-    """Упорядочить 4 точки как TL, TR, BR, BL (надёжно через суммы/разности)."""
+    """Order 4 points as TL, TR, BR, BL (robustly via sums/differences)."""
     pts = np.array(pts, dtype=np.float64).reshape(4, 2)
     s = pts.sum(axis=1)
     d = np.diff(pts, axis=1).ravel()  # y - x
@@ -91,18 +91,18 @@ def _order_corners(pts):
 
 
 # ----------------------------------------------------------------------------
-# Шаг 2: загрузка AOI (углы местности + исходный CRS)
+# Step 2: loading the AOI (ground corners + source CRS)
 # ----------------------------------------------------------------------------
 
 def load_aoi(map_name, aoi_path):
     """
-    Найти и распарсить AOI для карты. aoi_path может быть:
-      - папкой с сайдкарами по имени карты (<map_name>.geojson/.json/.txt),
-      - одним файлом (применяется ко всем картам).
-    Возвращает (corners, source_epsg) или None.
-      corners — 4 точки [TL, TR, BR, BL] в координатах исходного CRS,
-      source_epsg — int (по умолчанию config.DEFAULT_SOURCE_EPSG = 4284, Пулково 1942).
-    Никогда не падает: при любой проблеме чтения возвращает None.
+    Find and parse the AOI for the map. aoi_path can be:
+      - a folder of sidecars named after the map (<map_name>.geojson/.json/.txt),
+      - a single file (applied to all maps).
+    Returns (corners, source_epsg) or None.
+      corners — 4 points [TL, TR, BR, BL] in source CRS coordinates,
+      source_epsg — int (default config.DEFAULT_SOURCE_EPSG = 4284, Pulkovo 1942).
+    Never crashes: on any read problem it returns None.
     """
     if not aoi_path:
         return None
@@ -121,7 +121,7 @@ def load_aoi(map_name, aoi_path):
 
 
 def _resolve_aoi_file(path, map_name):
-    """Выбрать конкретный AOI-файл: сайдкар по имени карты или единый файл."""
+    """Pick a specific AOI file: a sidecar named after the map or a single shared file."""
     if path.is_file():
         return path
     if path.is_dir():
@@ -129,7 +129,7 @@ def _resolve_aoi_file(path, map_name):
             candidate = path / f"{map_name}{ext}"
             if candidate.is_file():
                 return candidate
-        # Единый AOI на весь датасет, если положили один файл в папку.
+        # A single AOI for the whole dataset, if one file was placed in the folder.
         files = sorted(p for p in path.iterdir()
                        if p.suffix.lower() in (".geojson", ".json", ".txt"))
         if len(files) == 1:
@@ -139,8 +139,8 @@ def _resolve_aoi_file(path, map_name):
 
 def _parse_aoi_geojson(path):
     """
-    Достать 4 угла из GeoJSON. Поддержка Polygon/Feature/FeatureCollection.
-    CRS берём из поля 'crs' (EPSG), иначе — дефолт (Пулково 1942).
+    Extract 4 corners from GeoJSON. Supports Polygon/Feature/FeatureCollection.
+    The CRS is taken from the 'crs' field (EPSG), otherwise the default (Pulkovo 1942).
     """
     data = json.loads(path.read_text(encoding="utf-8"))
     epsg = _epsg_from_geojson(data)
@@ -162,7 +162,7 @@ def _epsg_from_geojson(data):
 
 
 def _first_polygon_ring(data):
-    """Вернуть внешнее кольцо первого попавшегося полигона как список [x, y]."""
+    """Return the outer ring of the first polygon found as a list of [x, y]."""
     if data.get("type") == "FeatureCollection":
         for feat in data.get("features", []):
             ring = _ring_from_geometry(feat.get("geometry"))
@@ -188,10 +188,10 @@ def _ring_from_geometry(geom):
 
 def _parse_aoi_txt(path):
     """
-    Текстовый AOI. Поддерживаем:
-      - первую строку '# epsg=4284' (необязательно),
-      - либо 4 строки 'lon lat' (углы по часовой/в любом порядке — упорядочим),
-      - либо одну строку 'minlon minlat maxlon maxlat' (bbox).
+    A text AOI. We support:
+      - a first line '# epsg=4284' (optional),
+      - either 4 lines of 'lon lat' (corners clockwise/in any order — we'll order them),
+      - or a single line 'minlon minlat maxlon maxlat' (bbox).
     """
     epsg = config.DEFAULT_SOURCE_EPSG
     points = []
@@ -222,11 +222,11 @@ def _parse_aoi_txt(path):
 
 def _corners_from_ring(ring):
     """
-    Из кольца координат сделать 4 угла [TL, TR, BR, BL].
-    Если в кольце ровно 4 уникальные точки — упорядочиваем их; иначе берём bbox.
+    Make 4 corners [TL, TR, BR, BL] from a ring of coordinates.
+    If the ring has exactly 4 unique points — we order them; otherwise we take the bbox.
     """
     pts = [(float(p[0]), float(p[1])) for p in ring]
-    # Убираем замыкающую точку, если кольцо закрыто.
+    # Remove the closing point if the ring is closed.
     if len(pts) >= 2 and pts[0] == pts[-1]:
         pts = pts[:-1]
     if len(pts) == 4:
@@ -237,7 +237,7 @@ def _corners_from_ring(ring):
 
 
 def _corners_from_bbox(min_lon, min_lat, max_lon, max_lat):
-    """bbox -> [TL, TR, BR, BL] для north-up (верх = max_lat)."""
+    """bbox -> [TL, TR, BR, BL] for north-up (top = max_lat)."""
     return np.array([
         [min_lon, max_lat],  # TL
         [max_lon, max_lat],  # TR
@@ -247,26 +247,26 @@ def _corners_from_bbox(min_lon, min_lat, max_lon, max_lat):
 
 
 def _order_corners_geo(pts):
-    """Упорядочить 4 гео-точки как TL, TR, BR, BL (верх = большая широта)."""
+    """Order 4 geo-points as TL, TR, BR, BL (top = larger latitude)."""
     pts = np.array(pts, dtype=np.float64)
-    # Верхняя пара — две точки с наибольшей широтой (y), нижняя — с наименьшей.
-    order = pts[np.argsort(pts[:, 1])]  # по возрастанию широты
+    # The top pair is the two points with the largest latitude (y), the bottom — the smallest.
+    order = pts[np.argsort(pts[:, 1])]  # ascending latitude
     bottom = order[:2]
     top = order[2:]
-    tl, tr = top[np.argsort(top[:, 0])]      # слева направо по долготе
+    tl, tr = top[np.argsort(top[:, 0])]      # left to right by longitude
     bl, br = bottom[np.argsort(bottom[:, 0])]
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
 # ----------------------------------------------------------------------------
-# Шаг 3: построение трансформации
+# Step 3: building the transformation
 # ----------------------------------------------------------------------------
 
 def build_transform(pixel_corners, aoi):
     """
-    pixel_corners — 4 угла рамки в пикселях [TL, TR, BR, BL] (из find_corner_gcps).
-    aoi — (corners_geo, source_epsg) из load_aoi.
-    Возвращает GeoTransform или None.
+    pixel_corners — the 4 frame corners in pixels [TL, TR, BR, BL] (from find_corner_gcps).
+    aoi — (corners_geo, source_epsg) from load_aoi.
+    Returns a GeoTransform or None.
     """
     if pixel_corners is None or aoi is None or not _HAS_PYPROJ:
         return None
@@ -280,9 +280,9 @@ def build_transform(pixel_corners, aoi):
 
 def _reprojection_rms(homography, src, dst):
     """
-    Невязка обратной проекции в пикселях: переводим dst обратно в пиксели через
-    H^-1 и сравниваем со src. Для 4-точечной гомографии ~0, но честно считаем
-    (ловит вырожденные/коллинеарные случаи).
+    Back-projection residual in pixels: convert dst back to pixels via H^-1 and
+    compare with src. For a 4-point homography it is ~0, but we compute it honestly
+    (it catches degenerate/collinear cases).
     """
     try:
         inv = np.linalg.inv(homography)
@@ -296,30 +296,30 @@ def _reprojection_rms(homography, src, dst):
 
 def georeference(image, map_name, aoi_path):
     """
-    Удобная обёртка для пайплайна: пройти шаги 1-3.
-    Возвращает (GeoTransform | None, info_dict) — info для сводки/логов.
+    A convenience wrapper for the pipeline: run steps 1-3.
+    Returns (GeoTransform | None, info_dict) — info for the summary/logs.
     """
     info = {"georeferenced": False, "reason": ""}
     if not aoi_path:
-        info["reason"] = "AOI не задан (--aoi)"
+        info["reason"] = "AOI not given (--aoi)"
         return None, info
     if not _HAS_PYPROJ:
-        info["reason"] = "pyproj не установлен"
+        info["reason"] = "pyproj is not installed"
         return None, info
 
     pixel_corners = find_corner_gcps(image)
     if pixel_corners is None:
-        info["reason"] = "рамка карты не найдена"
+        info["reason"] = "map frame not found"
         return None, info
 
     aoi = load_aoi(map_name, aoi_path)
     if aoi is None:
-        info["reason"] = "AOI для карты не найден/не распознан"
+        info["reason"] = "AOI for the map not found/not recognized"
         return None, info
 
     transform = build_transform(pixel_corners, aoi)
     if transform is None:
-        info["reason"] = "не удалось построить трансформацию"
+        info["reason"] = "could not build the transformation"
         return None, info
 
     info.update({

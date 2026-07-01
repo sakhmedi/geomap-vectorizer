@@ -1,16 +1,16 @@
-# ОПЦИОНАЛЬНЫЕ зависимости для режима --use-sam (Segment Anything Model).
-# НЕ нужны для базового конвейера — он полностью работает на requirements.txt.
-# Ставьте это ТОЛЬКО если хотите попробовать SAM-сегментацию:
+# OPTIONAL dependencies for the --use-sam mode (Segment Anything Model).
+# NOT needed for the base pipeline — it runs entirely on requirements.txt.
+# Install this ONLY if you want to try SAM segmentation:
 #
 #   pip install -r requirements-sam.txt
 #
-# Плюс скачайте чекпойнт модели (vit_b, ~370 МБ) и положите в models/:
+# Also download the model checkpoint (vit_b, ~370 MB) and put it into models/:
 #   https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
-#   -> models/sam_vit_b_01ec64.pth   (или задайте путь через SAM_CHECKPOINT)
+#   -> models/sam_vit_b_01ec64.pth   (or set the path via SAM_CHECKPOINT)
 #
-# Если что-то из этого отсутствует, --use-sam просто откатится на классический
-# HSV-путь с понятным сообщением — конвейер не упадёт.
+# If any of this is missing, --use-sam simply falls back to the classic HSV path
+# with a clear message — the pipeline does not crash.
 
-torch>=2.0                 # бэкенд SAM (CPU или CUDA)
-torchvision>=0.15          # нужен segment-anything (трансформы изображений)
-segment-anything>=1.0      # сама модель и генератор масок
+torch>=2.0                 # the SAM backend (CPU or CUDA)
+torchvision>=0.15          # needed by segment-anything (image transforms)
+segment-anything>=1.0      # the model itself and the mask generator
